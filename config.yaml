@@ -1,0 +1,43 @@
+# Training Configuration
+
+output_dir: "lumina2-wds-training"
+seed: 42
+report_to: "tensorboard"
+validation_prompt: "a cute dog"
+validation_steps: 1000
+num_validation_images: 4
+
+# Data (WebDataset)
+data_url: "pipe:aws s3 cp s3://my-bucket/shards/{00000..00100}.tar -" # REPLACE THIS
+train_batch_size: 1
+max_train_steps: 10000
+checkpointing_steps: 2000
+
+# Optimization
+learning_rate: 1.0e-4
+lr_warmup_steps: 500
+optimizer: "adamw"
+mixed_precision: "bf16"
+gradient_accumulation_steps: 4
+gradient_checkpointing: true
+
+# Model Configuration (Pretrain from Scratch)
+pretrained_model_name_or_path: null 
+text_encoder_path: "google/gemma-2-2b" 
+vae_path: "stabilityai/sdxl-vae"
+
+model_config:
+  axes_dim_rope: [32, 32, 32]
+  axes_lens: [300, 512, 512]
+  cap_feat_dim: 2304
+  hidden_size: 2304
+  in_channels: 16
+  multiple_of: 256
+  norm_eps: 1.0e-5
+  num_attention_heads: 24
+  num_kv_heads: 8
+  num_layers: 26
+  num_refiner_layers: 2
+  patch_size: 2
+  sample_size: 128
+  scaling_factor: 1.0
