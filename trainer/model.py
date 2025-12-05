@@ -1,10 +1,14 @@
 import torch
+import importlib
 from diffusers import (
-    AutoencoderKL,
+    AutoencoderKLFlux2,
     FlowMatchEulerDiscreteScheduler,
-    Lumina2Transformer2DModel,
 )
-from transformers import AutoTokenizer, Gemma2Model
+from transformers import AutoTokenizer, AutoModelForCausalLM
+
+def get_class_from_string(class_path):
+    module_name, class_name = class_path.rsplit(".", 1)
+    return getattr(importlib.import_module(module_name), class_name)
 
 def load_models(args):
     # Load scheduler
@@ -17,32 +21,33 @@ def load_models(args):
         noise_scheduler = FlowMatchEulerDiscreteScheduler() # Use default config
 
     # Load Text Encoder & Tokenizer (Usually pretrained even if model is scratch)
-    # Unless we are pretraining text encoder too, which is rare for this context. 
+    # Unless we are pretraining text encoder too, which is rare for this context.
     # We assume text encoder is always pretrained or provided via path.
     tokenizer = AutoTokenizer.from_pretrained(
         args.text_encoder_path or args.pretrained_model_name_or_path,
-        subfolder="tokenizer", revision=args.revision
     )
-    text_encoder = Gemma2Model.from_pretrained(
-        args.text_encoder_path or args.pretrained_model_name_or_path, 
-        subfolder="text_encoder", revision=args.revision, variant=args.variant
+    text_encoder = AutoModelForCausalLM.from_pretrained(
+        args.text_encoder_path or args.pretrained_model_name_or_path,
     )
 
     # Load VAE (Usually frozen/pretrained)
-    vae = AutoencoderKL.from_pretrained(
+    vae = AutoencoderKLFlux2.from_pretrained(
         args.vae_path or args.pretrained_model_name_or_path,
-        subfolder="vae", revision=args.revision, variant=args.variant
     )
+
+    # Determine Transformer Class
+    transformer_class_path = getattr(args, "transformer_class_path", "diffusers.ZImageTransformer2DModel")
+    TransformerClass = get_class_from_string(transformer_class_path)
 
     # Load Transformer
     if args.model_config:
-        print(f"Initializing Lumina2Transformer2DModel from config: {args.model_config}")
+        print(f"Initializing {TransformerClass.__name__} from config: {args.model_config}")
         # Filter out non-init args if any, usually config dict matches init
         # The config provided has keys like "_class_name" which we should ignore
         config = {k: v for k, v in args.model_config.items() if not k.startswith("_")}
-        transformer = Lumina2Transformer2DModel(**config)
+        transformer = TransformerClass(**config)
     elif args.pretrained_model_name_or_path:
-        transformer = Lumina2Transformer2DModel.from_pretrained(
+        transformer = TransformerClass.from_pretrained(
             args.pretrained_model_name_or_path, subfolder="transformer", 
             revision=args.revision, variant=args.variant
         )

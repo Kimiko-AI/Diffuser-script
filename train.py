@@ -8,33 +8,35 @@ from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import ProjectConfiguration, set_seed
 from tqdm.auto import tqdm
-from diffusers import Lumina2Pipeline
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import compute_density_for_timestep_sampling
-
 from trainer.dataset import get_wds_loader
 from trainer.model import load_models
 from trainer.utils import log_validation, save_model_card
+from trainer.ZImage import ZImageWrapper
 
 logger = get_logger(__name__)
 
+
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="config.yaml")
+    parser.add_argument("--config", type=str, default="config/config.yaml")
     args, unknown = parser.parse_known_args()
-    
+
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
-        
+
     parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, default=args.config) # Re-add config to avoid error
     for k, v in config.items():
         if isinstance(v, (int, float, str, bool)) or v is None:
             parser.add_argument(f"--{k}", type=type(v) if v is not None else str, default=v)
         else:
             parser.add_argument(f"--{k}", default=v)
-            
+
     parser.add_argument("--local_rank", type=int, default=-1)
     return parser.parse_args()
+
 
 def main():
     args = parse_args()
@@ -48,149 +50,155 @@ def main():
 
     if accelerator.is_main_process:
         os.makedirs(args.output_dir, exist_ok=True)
+        print(args)
         accelerator.init_trackers("lumina2-training", config=vars(args))
 
     set_seed(args.seed)
-    
+
     # Load Models
     noise_scheduler, tokenizer, text_encoder, vae, transformer = load_models(args)
+
+    # Prepare Wrapper
+    # Move frozen models to device/dtype first if needed, or let accelerator handle it.
+    # For VAE/TextEncoder, we often want specific dtypes.
+    weight_dtype = torch.float32
+    if accelerator.mixed_precision == "fp16":
+        weight_dtype = torch.float16
+    elif accelerator.mixed_precision == "bf16":
+        weight_dtype = torch.bfloat16
+
+    vae.to(accelerator.device, dtype=torch.float32)
     
-    transformer.train()
-    vae.requires_grad_(False)
-    text_encoder.requires_grad_(False)
+    # Use bf16 for text encoder if mixed precision is bf16, otherwise float32 for stability
+    text_encoder_dtype = torch.bfloat16 if accelerator.mixed_precision == "bf16" else torch.float32
+    text_encoder.to(accelerator.device, dtype=text_encoder_dtype)
     
-    if args.gradient_checkpointing:
-        transformer.enable_gradient_checkpointing()
-        
-    # Optimizer
-    optimizer = torch.optim.AdamW(
-        transformer.parameters(), lr=args.learning_rate, weight_decay=1e-2
+    # Create Wrapper
+    timestep_sampling_config = getattr(args, "timestep_sampling", None)
+    model_wrapper = ZImageWrapper(
+        transformer=transformer,
+        vae=vae,
+        text_encoder=text_encoder,
+        tokenizer=tokenizer,
+        noise_scheduler=noise_scheduler,
+        timestep_sampling_config=timestep_sampling_config
     )
     
+    if args.gradient_checkpointing:
+        model_wrapper.transformer.enable_gradient_checkpointing()
+
+    # Optimizer (optimize only transformer parameters)
+    optimizer = torch.optim.AdamW(
+        model_wrapper.transformer.parameters(), lr=args.learning_rate, weight_decay=1e-2
+    )
+
     # Dataset (WebDataset)
     dataloader = get_wds_loader(
         url_pattern=args.data_url,
         batch_size=args.train_batch_size,
-        num_workers=4, # Adjustable
-        is_train=True
+        num_workers=getattr(args, "dataloader_num_workers", 8),
+        is_train=True,
+        base_resolution=getattr(args, "resolution", 256),
+        bucket_step_size=getattr(args, "bucket_step_size", 32)
     )
-    
+
     # Scheduler
     lr_scheduler = get_scheduler(
-        "constant", optimizer=optimizer, 
-        num_warmup_steps=args.lr_warmup_steps, 
+        getattr(args, "lr_scheduler_type", "constant"),
+        optimizer=optimizer,
+        num_warmup_steps=args.lr_warmup_steps,
         num_training_steps=args.max_train_steps
     )
-    
-    # Prepare
-    transformer, optimizer, lr_scheduler = accelerator.prepare(
-        transformer, optimizer, lr_scheduler
-    )
-    
-    weight_dtype = torch.float32
-    if accelerator.mixed_precision == "fp16": weight_dtype = torch.float16
-    elif accelerator.mixed_precision == "bf16": weight_dtype = torch.bfloat16
-    
-    vae.to(accelerator.device, dtype=torch.float32)
-    text_encoder.to(accelerator.device, dtype=torch.bfloat16)
 
-    # Text Encoding Helper
-    text_encoding_pipeline = Lumina2Pipeline(
-        vae=vae, text_encoder=text_encoder, tokenizer=tokenizer, transformer=None, scheduler=None
+    # Prepare
+    # Accelerator will handle the wrapper (DDP, etc.)
+    model_wrapper, optimizer, lr_scheduler = accelerator.prepare(
+        model_wrapper, optimizer, lr_scheduler
     )
-    
+
+    # Resume from checkpoint
     global_step = 0
-    progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
-    
+    if args.resume_from_checkpoint:
+        if args.resume_from_checkpoint != "latest":
+            path = os.path.basename(args.resume_from_checkpoint)
+        else:
+            # Get the most recent checkpoint
+            dirs = os.listdir(args.output_dir)
+            dirs = [d for d in dirs if d.startswith("checkpoint")]
+            dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
+            path = dirs[-1] if len(dirs) > 0 else None
+
+        if path is None:
+            accelerator.print(
+                f"Checkpoint '{args.resume_from_checkpoint}' not found. Starting from scratch."
+            )
+        else:
+            accelerator.print(f"Resuming from checkpoint {path}")
+            accelerator.load_state(os.path.join(args.output_dir, path))
+            global_step = int(path.split("-")[1])
+
+    progress_bar = tqdm(range(global_step, args.max_train_steps), disable=not accelerator.is_local_main_process)
+    progress_bar.set_description("Steps")
+
     # Training Loop
     data_iter = iter(dataloader)
-    
+
     while global_step < args.max_train_steps:
         try:
             batch = next(data_iter)
         except StopIteration:
             data_iter = iter(dataloader)
             batch = next(data_iter)
-            
-        with accelerator.accumulate(transformer):
+
+        with accelerator.accumulate(model_wrapper):
             images = batch["pixels"].to(accelerator.device, dtype=weight_dtype)
             prompts = batch["prompts"]
+            
+            # Forward pass through wrapper
+            loss = model_wrapper(images, prompts, accelerator.device, weight_dtype)
 
-            # 1. Text Encode
-            with torch.no_grad():
-                    prompt_embeds, prompt_mask, _, _ = text_encoding_pipeline.encode_prompt(
-                    prompts, max_sequence_length=256, device=accelerator.device
-                )
-                    prompt_embeds = prompt_embeds.to(dtype=weight_dtype)
-            
-            # 2. VAE Encode
-            with torch.no_grad():
-                latents = vae.encode(images.to(dtype=torch.float32)).latent_dist.sample()
-                latents = (latents - vae.config.shift_factor) * vae.config.scaling_factor
-                latents = latents.to(dtype=weight_dtype)
-            
-            # 3. Noise & Flow Matching
-            noise = torch.randn_like(latents)
-            bsz = latents.shape[0]
-            u = compute_density_for_timestep_sampling(batch_size=bsz).to(latents.device)
-            
-            # Interpolate
-            sigmas = u
-            noisy_latents = (1.0 - sigmas.view(bsz, 1, 1, 1)) * noise + sigmas.view(bsz, 1, 1, 1) * latents
-            
-            # 4. Predict
-            model_pred = transformer(
-                hidden_states=noisy_latents,
-                encoder_hidden_states=prompt_embeds,
-                encoder_attention_mask=prompt_mask,
-                timestep=u.flatten(), 
-                return_dict=False
-            )[0]
-            
-            # 5. Loss
-            target = latents - noise
-            loss = F.mse_loss(model_pred.float(), target.float())
-            
             accelerator.backward(loss)
             if accelerator.sync_gradients:
-                accelerator.clip_grad_norm_(transformer.parameters(), 1.0)
-                
+                accelerator.clip_grad_norm_(model_wrapper.module.transformer.parameters() if hasattr(model_wrapper, "module") else model_wrapper.transformer.parameters(), 1.0)
+
             optimizer.step()
             lr_scheduler.step()
             optimizer.zero_grad()
-        
+
         if accelerator.sync_gradients:
             global_step += 1
             progress_bar.update(1)
-            
+
             if accelerator.is_main_process:
                 if global_step % args.checkpointing_steps == 0:
                     save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
                     accelerator.save_state(save_path)
+                    
+                    # Access unwrapped transformer for saving model card info if needed
+                    unwrapped_transformer = accelerator.unwrap_model(model_wrapper).transformer
                     save_model_card(
                         repo_id=f"lumina2-step-{global_step}",
                         base_model=args.pretrained_model_name_or_path or "scratch",
                         repo_folder=save_path
                     )
-                
+
                 if global_step % args.validation_steps == 0:
+                    # Unwrap for validation not needed here as log_validation handles unwrap or receives wrapper
+                    # We pass the wrapper directly (it might be wrapped by accelerator, log_validation handles unwrapping if needed)
                     log_validation(
                         accelerator=accelerator,
-                        transformer=transformer,
-                        vae=vae,
-                        text_encoder=text_encoder,
-                        tokenizer=tokenizer,
-                        scheduler=noise_scheduler,
+                        model_wrapper=model_wrapper,
                         args=args,
                         global_step=global_step
                     )
-        
+
         logs = {"loss": loss.item(), "lr": lr_scheduler.get_last_lr()[0]}
         accelerator.log(logs, step=global_step)
-        
+
         if global_step >= args.max_train_steps: break
 
     accelerator.end_training()
+
 
 if __name__ == "__main__":
     main()

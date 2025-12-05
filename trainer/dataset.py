@@ -4,23 +4,37 @@ import torchvision.transforms as transforms
 from PIL import Image
 import numpy as np
 from functools import partial
+import logging
 
-# --- Configuration ---
-BUCKET_SIZES = [
-    (256, 256),
-    (512, 512),
-    (1024, 1024),
-]
-# Pre-calculate ratios for faster lookups
-BUCKET_RATIOS = np.array([w / h for w, h in BUCKET_SIZES])
+logger = logging.getLogger(__name__)
 
-def assign_bucket_index(width, height):
+def generate_buckets(base_width, base_height, step_size=32):
+    # Generate bucket sizes based on the formula (BASE_WIDTH - STEP_SIZE * n, BASE_HEIGHT + STEP_SIZE * n)
+    # where n ranges from -4 to 4 (inclusive).
+    n_range = range(-4, 5) # n from -4 to 4 inclusive
+
+    bucket_sizes = []
+    for n in n_range:
+        width = base_width - (step_size * n)
+        height = base_height + (step_size * n)
+        if width > 0 and height > 0: # Ensure dimensions are positive
+            bucket_sizes.append((width, height))
+
+    # Sort the bucket sizes
+    bucket_sizes = sorted(list(set(bucket_sizes)))
+
+    # Pre-calculate ratios for faster lookups
+    bucket_ratios = np.array([w / h for w, h in bucket_sizes])
+    
+    return bucket_sizes, bucket_ratios
+
+def assign_bucket_index(width, height, bucket_ratios):
     ratio = width / height
-    idx = (np.abs(BUCKET_RATIOS - ratio)).argmin()
+    idx = (np.abs(bucket_ratios - ratio)).argmin()
     return idx
 
-def resize_to_bucket(image, bucket_idx):
-    target_w, target_h = BUCKET_SIZES[bucket_idx]
+def resize_to_bucket(image, bucket_idx, bucket_sizes):
+    target_w, target_h = bucket_sizes[bucket_idx]
     return image.resize((target_w, target_h), Image.BICUBIC)
 
 # --- 1. Preprocessing Function ---
@@ -48,16 +62,28 @@ def transform_sample(sample):
             rating = json_data.get("rating", [])
             character_tags = json_data.get("character_tags", [])
             general_tags = json_data.get("general_tags", [])
-            # If lists, join them. If strings, concat.
-            parts = []
-            if isinstance(rating, list): parts.extend(rating)
-            else: parts.append(str(rating))
-            if isinstance(character_tags, list): parts.extend(character_tags)
-            else: parts.append(str(character_tags))
-            if isinstance(general_tags, list): parts.extend(general_tags)
-            else: parts.append(str(general_tags))
             
-            prompt = " ".join(map(str, parts))[:512]
+            # Helper to process tag lists
+            def process_tags(tags):
+                if isinstance(tags, list):
+                    return [str(t) for t in tags]
+                return [str(tags)]
+
+            parts = []
+            # Add rating (usually kept at start)
+            parts.extend(process_tags(rating))
+            
+            # Shuffle character and general tags for robustness
+            char_parts = process_tags(character_tags)
+            gen_parts = process_tags(general_tags)
+            
+            # Combine char and gen tags
+            all_tags = char_parts + gen_parts
+            np.random.shuffle(all_tags)
+            
+            parts.extend(all_tags)
+            
+            prompt = " ".join(parts)[:512] # Truncate to 512 chars (or tokens approximately)
         else:
             prompt = str(json_data)
     elif "txt" in sample:
@@ -72,8 +98,11 @@ def transform_sample(sample):
     }
 
 # --- 2. The Bucket Batcher ---
-def bucket_batcher(data_stream, batch_size=1):
-    buckets = [[] for _ in BUCKET_SIZES]
+def bucket_batcher(data_stream, batch_size=1, bucket_sizes=None, bucket_ratios=None):
+    if bucket_sizes is None or bucket_ratios is None:
+        raise ValueError("Bucket configuration (sizes and ratios) must be provided to bucket_batcher.")
+        
+    buckets = [[] for _ in bucket_sizes]
     to_tensor = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize([0.5], [0.5])
@@ -83,9 +112,9 @@ def bucket_batcher(data_stream, batch_size=1):
         try:
             image = sample["image"]
             w, h = image.size
-            b_idx = assign_bucket_index(w, h)
+            b_idx = assign_bucket_index(w, h, bucket_ratios)
             
-            image_resized = resize_to_bucket(image, b_idx)
+            image_resized = resize_to_bucket(image, b_idx, bucket_sizes)
             image_tensor = to_tensor(image_resized)
 
             buckets[b_idx].append({
@@ -102,11 +131,20 @@ def bucket_batcher(data_stream, batch_size=1):
                 buckets[b_idx] = []
 
         except Exception as e:
-            print(f"Skipping sample due to error: {e}")
+            logger.warning(f"Skipping sample due to error: {e}")
             continue
 
 # --- 3. The Pipeline Builder ---
-def get_wds_loader(url_pattern, batch_size, num_workers=4, is_train=True):
+def get_wds_loader(url_pattern, batch_size, num_workers=4, is_train=True, base_resolution=256, bucket_step_size=32):
+    
+    # Determine base width and height
+    if isinstance(base_resolution, (list, tuple)):
+        base_w, base_h = base_resolution
+    else:
+        base_w, base_h = base_resolution, base_resolution
+        
+    bucket_sizes, bucket_ratios = generate_buckets(base_w, base_h, bucket_step_size)
+    
     dataset = wds.WebDataset(
         url_pattern, 
         resampled=True, 
@@ -121,7 +159,11 @@ def get_wds_loader(url_pattern, batch_size, num_workers=4, is_train=True):
     dataset = dataset.compose(wds.split_by_worker)
     dataset = dataset.decode("pil", handler=wds.warn_and_continue)
     dataset = dataset.map(transform_sample, handler=wds.warn_and_continue)
-    dataset = dataset.compose(partial(bucket_batcher, batch_size=batch_size))
+    
+    # Pass the generated bucket config to the batcher
+    dataset = dataset.compose(
+        partial(bucket_batcher, batch_size=batch_size, bucket_sizes=bucket_sizes, bucket_ratios=bucket_ratios)
+    )
 
     loader = wds.WebLoader(
         dataset,

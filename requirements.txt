@@ -1,0 +1,11 @@
+torch>=2.0.0
+accelerate
+diffusers
+transformers
+webdataset
+torchvision
+Pillow
+numpy
+pyyaml
+tqdm
+wandb

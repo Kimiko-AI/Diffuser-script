@@ -1,0 +1,63 @@
+# Training Configuration
+
+output_dir: "zimage-wds-training"
+seed: 42
+report_to: "wandb"
+validation_prompt: "general 1girl blue_eyes blue_hair bubble candy character_name double_bun food food_in_mouth hair_bun lollipop low_twintails multicolored_hair portrait solo streaked_hair twintails twitter_username upper_body"
+validation_steps: 1000
+num_validation_images: 4
+
+# Optimization
+learning_rate: 1.0e-3
+lr_scheduler_type: "constant" # Options: "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
+lr_warmup_steps: 500
+mixed_precision: "bf16"
+gradient_accumulation_steps: 1
+gradient_checkpointing: true
+resume_from_checkpoint: null # "latest" or path to checkpoint directory
+
+# Data (WebDataset)
+data_url: "/teamspace/studios/this_studio/anime/train/0000{1..6}.tar" # REPLACE THIS
+resolution: 256 # Base resolution (int or [w, h])
+bucket_step_size: 32
+train_batch_size: 64
+dataloader_num_workers: 8
+max_train_steps: 10000
+
+# Timestep Sampling
+timestep_sampling:
+  weighting_scheme: "cosmap" # Options: "cosmap", "logit_normal", "uniform"
+  logit_mean: 0.0
+  logit_std: 1.0
+  mode_scale: 1.29
+
+# Model Configuration (Pretrain from Scratch)
+pretrained_model_name_or_path: null
+text_encoder_path: "google/gemma-3-270m"
+vae_path: "REPA-E/e2e-flux-vae"
+transformer_class_path: "diffusers.ZImageTransformer2DModel"
+
+model_config:
+    all_f_patch_size:
+      - 1
+    all_patch_size:
+      - 2
+    axes_dims:
+      - 32
+      - 48
+      - 48
+    axes_lens:
+      - 1536
+      - 512
+      - 512
+    cap_feat_dim: 640
+    dim: 768
+    in_channels: 16
+    n_heads: 6
+    n_kv_heads: 6
+    n_layers: 8
+    n_refiner_layers: 2
+    norm_eps: 1e-05
+    qk_norm: true
+    rope_theta: 256.0
+    t_scale: 1000.0
