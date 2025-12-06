@@ -4,13 +4,13 @@ output_dir: "zimage-wds-training"
 seed: 42
 report_to: "wandb"
 validation_prompt: "general 1girl blue_eyes blue_hair bubble candy character_name double_bun food food_in_mouth hair_bun lollipop low_twintails multicolored_hair portrait solo streaked_hair twintails twitter_username upper_body"
-validation_steps: 100
+validation_steps: 300
 num_validation_images: 4
 
 # Optimization
 learning_rate: 1.0e-5
-lr_scheduler_type: "constant" # Options: "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
-lr_warmup_steps: 500
+lr_scheduler_type: "cosine" # Options: "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
+lr_warmup_steps: 50
 mixed_precision: "bf16"
 gradient_accumulation_steps: 1
 gradient_checkpointing: true
