@@ -14,7 +14,7 @@ def load_models(args):
     # Load scheduler
     if args.pretrained_model_name_or_path:
         noise_scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(
-            args.pretrained_model_name_or_path, subfolder="scheduler", revision=args.revision
+            args.pretrained_model_name_or_path, subfolder="scheduler",
         )
     else:
         # Default scheduler config if scratch
