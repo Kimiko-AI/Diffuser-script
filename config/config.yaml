@@ -8,7 +8,7 @@ validation_steps: 1000
 num_validation_images: 4
 
 # Optimization
-learning_rate: 1.0e-3
+learning_rate: 1.0e-5
 lr_scheduler_type: "constant" # Options: "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
 lr_warmup_steps: 500
 mixed_precision: "bf16"
