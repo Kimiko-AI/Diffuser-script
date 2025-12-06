@@ -49,7 +49,7 @@ def load_models(args):
     elif args.pretrained_model_name_or_path:
         transformer = TransformerClass.from_pretrained(
             args.pretrained_model_name_or_path, subfolder="transformer", 
-            revision=args.revision, variant=args.variant
+           # revision=args.revision, variant=args.variant
         )
     else:
         raise ValueError("Must provide either --pretrained_model_name_or_path or --model_config")
