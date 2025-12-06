@@ -1,7 +1,7 @@
 import torch
 import importlib
 from diffusers import (
-    AutoencoderKLFlux2,
+    AutoencoderKL,
     FlowMatchEulerDiscreteScheduler,
 )
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -24,15 +24,15 @@ def load_models(args):
     # Unless we are pretraining text encoder too, which is rare for this context.
     # We assume text encoder is always pretrained or provided via path.
     tokenizer = AutoTokenizer.from_pretrained(
-        args.text_encoder_path or args.pretrained_model_name_or_path,
+        args.text_encoder_path or args.pretrained_model_name_or_path, subfolder = "tokenizer"
     )
     text_encoder = AutoModelForCausalLM.from_pretrained(
-        args.text_encoder_path or args.pretrained_model_name_or_path,
+        args.text_encoder_path or args.pretrained_model_name_or_path, subfolder = "text_encoder"
     )
 
     # Load VAE (Usually frozen/pretrained)
-    vae = AutoencoderKLFlux2.from_pretrained(
-        args.vae_path or args.pretrained_model_name_or_path,
+    vae = AutoencoderKL.from_pretrained(
+        args.vae_path or args.pretrained_model_name_or_path, subfolder = "vae"
     )
 
     # Determine Transformer Class

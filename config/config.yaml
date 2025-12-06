@@ -17,7 +17,7 @@ gradient_checkpointing: true
 resume_from_checkpoint: null # "latest" or path to checkpoint directory
 checkpointing_steps: 10000
 # Data (WebDataset)
-data_url: "/teamspace/studios/this_studio/anime/train/0000{1..6}.tar" # REPLACE THIS
+data_url: "/root/anime/train/0000{1..6}.tar" # REPLACE THIS
 resolution: 256 # Base resolution (int or [w, h])
 bucket_step_size: 32
 train_batch_size: 64
@@ -32,9 +32,9 @@ timestep_sampling:
   mode_scale: 1.29
 
 # Model Configuration (Pretrain from Scratch)
-pretrained_model_name_or_path: null
-text_encoder_path: "google/gemma-3-270m-it"
-vae_path: "REPA-E/e2e-flux-vae"
+pretrained_model_name_or_path: "Tongyi-MAI/Z-Image-Turbo"
+text_encoder_path: "Tongyi-MAI/Z-Image-Turbo"
+vae_path: "Tongyi-MAI/Z-Image-Turbo"
 transformer_class_path: "diffusers.ZImageTransformer2DModel"
 
 model_config:
