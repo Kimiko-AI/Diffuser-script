@@ -36,7 +36,7 @@ pretrained_model_name_or_path: "Tongyi-MAI/Z-Image-Turbo"
 text_encoder_path: "Tongyi-MAI/Z-Image-Turbo"
 vae_path: "Tongyi-MAI/Z-Image-Turbo"
 transformer_class_path: "diffusers.ZImageTransformer2DModel"
-
+model_config: false
 #model_config:
 #    all_f_patch_size:
 #      - 1
