@@ -15,14 +15,14 @@ mixed_precision: "bf16"
 gradient_accumulation_steps: 1
 gradient_checkpointing: true
 resume_from_checkpoint: null # "latest" or path to checkpoint directory
-checkpointing_steps: 10000
+checkpointing_steps: 1000
 # Data (WebDataset)
 data_url: "/root/anime/train/0000{1..6}.tar" # REPLACE THIS
 resolution: 256 # Base resolution (int or [w, h])
 bucket_step_size: 32
-train_batch_size: 32
+train_batch_size: 64
 dataloader_num_workers: 2
-max_train_steps: 10000
+max_train_steps: 5000
 
 # Timestep Sampling
 timestep_sampling:
