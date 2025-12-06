@@ -20,8 +20,8 @@ checkpointing_steps: 10000
 data_url: "/root/anime/train/0000{1..6}.tar" # REPLACE THIS
 resolution: 256 # Base resolution (int or [w, h])
 bucket_step_size: 32
-train_batch_size: 64
-dataloader_num_workers: 8
+train_batch_size: 16
+dataloader_num_workers: 2
 max_train_steps: 10000
 
 # Timestep Sampling
@@ -37,27 +37,27 @@ text_encoder_path: "Tongyi-MAI/Z-Image-Turbo"
 vae_path: "Tongyi-MAI/Z-Image-Turbo"
 transformer_class_path: "diffusers.ZImageTransformer2DModel"
 
-model_config:
-    all_f_patch_size:
-      - 1
-    all_patch_size:
-      - 2
-    axes_dims:
-      - 32
-      - 48
-      - 48
-    axes_lens:
-      - 1536
-      - 512
-      - 512
-    cap_feat_dim: 640
-    dim: 768
-    in_channels: 16
-    n_heads: 6
-    n_kv_heads: 6
-    n_layers: 8
-    n_refiner_layers: 2
-    #norm_eps: 1e-05
-    qk_norm: true
-    rope_theta: 256.0
-    t_scale: 1000.0
+#model_config:
+#    all_f_patch_size:
+#      - 1
+#    all_patch_size:
+#      - 2
+#    axes_dims:
+#      - 32
+#      - 48
+#      - 48
+#    axes_lens:
+#      - 1536
+#      - 512
+#      - 512
+#    cap_feat_dim: 640
+#    dim: 768
+#    in_channels: 16
+#    n_heads: 6
+#    n_kv_heads: 6
+#    n_layers: 8
+#    n_refiner_layers: 2
+#    #norm_eps: 1e-05
+#    qk_norm: true
+#    rope_theta: 256.0
+#    t_scale: 1000.0
