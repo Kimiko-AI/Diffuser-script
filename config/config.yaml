@@ -15,7 +15,7 @@ mixed_precision: "bf16"
 gradient_accumulation_steps: 1
 gradient_checkpointing: true
 resume_from_checkpoint: null # "latest" or path to checkpoint directory
-
+checkpointing_steps: 10000
 # Data (WebDataset)
 data_url: "/teamspace/studios/this_studio/anime/train/0000{1..6}.tar" # REPLACE THIS
 resolution: 256 # Base resolution (int or [w, h])
@@ -33,7 +33,7 @@ timestep_sampling:
 
 # Model Configuration (Pretrain from Scratch)
 pretrained_model_name_or_path: null
-text_encoder_path: "google/gemma-3-270m"
+text_encoder_path: "google/gemma-3-270m-it"
 vae_path: "REPA-E/e2e-flux-vae"
 transformer_class_path: "diffusers.ZImageTransformer2DModel"
 
@@ -57,7 +57,7 @@ model_config:
     n_kv_heads: 6
     n_layers: 8
     n_refiner_layers: 2
-    norm_eps: 1e-05
+    #norm_eps: 1e-05
     qk_norm: true
     rope_theta: 256.0
     t_scale: 1000.0

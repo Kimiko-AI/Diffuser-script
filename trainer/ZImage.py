@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from diffusers import ZImagePipeline
 from diffusers.training_utils import compute_density_for_timestep_sampling
 
+
 class ZImageWrapper(nn.Module):
     def __init__(self, transformer, vae, text_encoder, tokenizer, noise_scheduler, timestep_sampling_config=None):
         super().__init__()
@@ -12,24 +13,24 @@ class ZImageWrapper(nn.Module):
         self.text_encoder = text_encoder
         self.tokenizer = tokenizer
         self.noise_scheduler = noise_scheduler
-        
+
         # Default sampling config if none provided
         self.timestep_sampling_config = timestep_sampling_config or {"weighting_scheme": "cosmap"}
 
         # Freeze frozen components
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
-        
+
         # Ensure transformer is in train mode by default
-        self.transformer.train()
+        self.transformer.train().to(torch.bfloat16)
 
         # Helper pipeline for encoding text during training
         # We pass transformer=None because we only use it for encode_prompt
         self.text_encoding_pipeline = ZImagePipeline(
-            vae=self.vae, 
-            text_encoder=self.text_encoder, 
-            tokenizer=self.tokenizer, 
-            transformer=None, 
+            vae=self.vae,
+            text_encoder=self.text_encoder,
+            tokenizer=self.tokenizer,
+            transformer=None,
             scheduler=None
         )
 
@@ -58,27 +59,27 @@ class ZImageWrapper(nn.Module):
         # 3. Noise & Flow Matching Logic
         bsz = latents.shape[0]
         noise = torch.randn_like(latents)
-        
+
         # Sample timesteps/density
         # Unpack config for clarity
         scheme = self.timestep_sampling_config.get("weighting_scheme", "cosmap")
         logit_mean = self.timestep_sampling_config.get("logit_mean", 0.0)
         logit_std = self.timestep_sampling_config.get("logit_std", 1.0)
         mode_scale = self.timestep_sampling_config.get("mode_scale", 1.29)
-        
+
         u = compute_density_for_timestep_sampling(
-            batch_size=bsz, 
+            batch_size=bsz,
             weighting_scheme=scheme,
             logit_mean=logit_mean,
             logit_std=logit_std,
             mode_scale=mode_scale
         ).to(device)
-        
+
         # Interpolate (Flow Matching)
         sigmas = u
         sigmas_view = sigmas.view(bsz, 1, 1, 1)
         noisy_latents = (1.0 - sigmas_view) * noise + sigmas_view * latents
-        
+
         noisy_latents_list = list(noisy_latents.unsqueeze(2).unbind(dim=0))
 
         # 4. Predict
@@ -88,13 +89,13 @@ class ZImageWrapper(nn.Module):
             prompt_embeds,
             return_dict=False
         )[0]
-        
+
         model_pred = torch.stack(model_pred, dim=0).squeeze(2)
 
         # 5. Loss
         target = latents - noise
         loss = F.mse_loss(model_pred.float(), target.float())
-        
+
         return loss
 
     @torch.no_grad()
@@ -126,7 +127,7 @@ class ZImageWrapper(nn.Module):
 
         generator = torch.Generator(device=device).manual_seed(seed) if seed else None
         images = []
-        
+
         # Generate images
         for _ in range(num_images):
             img = pipeline(
@@ -140,8 +141,8 @@ class ZImageWrapper(nn.Module):
         # Restore original training state
         if was_training:
             self.transformer.train()
-            
+
         # Clean up to free memory if needed
         del pipeline
-        
+
         return images
