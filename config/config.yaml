@@ -4,7 +4,7 @@ output_dir: "zimage-wds-training"
 seed: 42
 report_to: "wandb"
 validation_prompt: "general 1girl blue_eyes blue_hair bubble candy character_name double_bun food food_in_mouth hair_bun lollipop low_twintails multicolored_hair portrait solo streaked_hair twintails twitter_username upper_body"
-validation_steps: 1000
+validation_steps: 100
 num_validation_images: 4
 
 # Optimization

@@ -14,6 +14,7 @@ from trainer.dataset import get_wds_loader
 from trainer.model import load_models
 from trainer.utils import log_validation, save_model_card
 from trainer.ZImage import ZImageWrapper
+import bitsandbytes as bnb
 
 logger = get_logger(__name__)
 
@@ -88,7 +89,7 @@ def main():
         model_wrapper.transformer.enable_gradient_checkpointing()
 
     # Optimizer (optimize only transformer parameters)
-    optimizer = torch.optim.AdamW(
+    optimizer = bnb.optim.Adam8bit(
         model_wrapper.transformer.parameters(), lr=args.learning_rate, weight_decay=1e-2
     )
 

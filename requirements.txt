@@ -9,3 +9,5 @@ numpy
 pyyaml
 tqdm
 wandb
+bitsandbytes
+git+https://github.com/huggingface/diffusers
