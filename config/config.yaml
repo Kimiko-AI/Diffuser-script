@@ -20,7 +20,7 @@ checkpointing_steps: 1000
 data_url: "/root/anime/train/0000{1..6}.tar" # REPLACE THIS
 resolution: 256 # Base resolution (int or [w, h])
 bucket_step_size: 32
-train_batch_size: 64
+train_batch_size: 32
 dataloader_num_workers: 2
 max_train_steps: 5000
 
