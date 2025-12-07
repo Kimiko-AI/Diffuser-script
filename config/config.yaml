@@ -3,7 +3,7 @@
 output_dir: "zimage-wds-training"
 seed: 42
 report_to: "wandb"
-validation_prompt: "general 1girl red_eyes black_hair bubble candy tokisaki_kurumi double_bun food food_in_mouth hair_bun lollipop low_twintails multicolored_hair portrait solo twintails upper_body"
+validation_prompt: "touhou rumia general 1girl d alternate_costume apron black_kimono black_skirt blonde_hair bow enmaided fang hair_between_eyes hair_bow heart heart_hands japanese_clothes kimono long_sleeves looking_at_viewer maid neck_ribbon obi obijime okobo one_eye_closed open_mouth platform_sandals red_bow red_eyes red_ribbon ribbon sandals sash short_hair simple_background skin_fang skirt smile socks solo standing standing_on_one_leg wa_maid white_apron white_background white_sash white_socks wide_sleeves yagasuri"
 validation_steps: 300
 num_validation_images: 4
 
@@ -14,7 +14,7 @@ lr_warmup_steps: 50
 mixed_precision: "bf16"
 gradient_accumulation_steps: 1
 gradient_checkpointing: true
-resume_from_checkpoint: null # "latest" or path to checkpoint directory
+resume_from_checkpoint: "latest" # "latest" or path to checkpoint directory
 checkpointing_steps: 1000
 # Data (WebDataset)
 data_url: "/root/anime/train/0000{1..6}.tar" # REPLACE THIS
