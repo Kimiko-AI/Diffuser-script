@@ -59,30 +59,57 @@ def transform_sample(sample):
         json_data = sample["json"]
         # User specific tag logic from previous file
         if isinstance(json_data, dict):
-            rating = json_data.get("rating", [])
-            character_tags = json_data.get("character_tags", [])
-            general_tags = json_data.get("general_tags", [])
-            
-            # Helper to process tag lists
-            def process_tags(tags):
-                if isinstance(tags, list):
-                    return [str(t) for t in tags]
-                return [str(tags)]
-
             parts = []
-            # Add rating (usually kept at start)
-            parts.extend(process_tags(rating))
-            
-            # Shuffle character and general tags for robustness
-            char_parts = process_tags(character_tags)
-            gen_parts = process_tags(general_tags)
-            
-            # Combine char and gen tags
-            all_tags = char_parts + gen_parts
-            np.random.shuffle(all_tags)
-            
-            parts.extend(all_tags)
-            
+
+            # Check for new structure (Pixiv/Tagger format)
+            if "tags" in json_data and isinstance(json_data["tags"], list):
+                all_general = []
+                all_character = []
+                all_rating = []
+
+                for tag_entry in json_data["tags"]:
+                    if "tags" in tag_entry and isinstance(tag_entry["tags"], dict):
+                        t = tag_entry["tags"]
+
+                        def extract_names(tag_list):
+                            if isinstance(tag_list, list):
+                                return [str(item["name"]) for item in tag_list if isinstance(item, dict) and "name" in item]
+                            return []
+
+                        all_general.extend(extract_names(t.get("general", [])))
+                        all_character.extend(extract_names(t.get("character", [])))
+                        all_rating.extend(extract_names(t.get("rating", [])))
+
+                parts.extend(all_rating)
+                content_tags = all_character + all_general
+                np.random.shuffle(content_tags)
+                parts.extend(content_tags)
+
+            # Fallback to old structure
+            else:
+                rating = json_data.get("rating", [])
+                character_tags = json_data.get("character_tags", [])
+                general_tags = json_data.get("general_tags", [])
+
+                # Helper to process tag lists
+                def process_tags(tags):
+                    if isinstance(tags, list):
+                        return [str(t) for t in tags]
+                    return [str(tags)]
+
+                # Add rating (usually kept at start)
+                parts.extend(process_tags(rating))
+
+                # Shuffle character and general tags for robustness
+                char_parts = process_tags(character_tags)
+                gen_parts = process_tags(general_tags)
+
+                # Combine char and gen tags
+                all_tags = char_parts + gen_parts
+                np.random.shuffle(all_tags)
+
+                parts.extend(all_tags)
+
             prompt = " ".join(parts)[:512] # Truncate to 512 chars (or tokens approximately)
         else:
             prompt = str(json_data)
