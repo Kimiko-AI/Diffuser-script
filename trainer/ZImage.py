@@ -1,18 +1,20 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import random
 from diffusers import ZImagePipeline
 from diffusers.training_utils import compute_density_for_timestep_sampling
 
 
 class ZImageWrapper(nn.Module):
-    def __init__(self, transformer, vae, text_encoder, tokenizer, noise_scheduler, timestep_sampling_config=None):
+    def __init__(self, transformer, vae, text_encoder, tokenizer, noise_scheduler, timestep_sampling_config=None, caption_dropout_prob=0.0):
         super().__init__()
         self.transformer = transformer
         self.vae = vae
         self.text_encoder = text_encoder
         self.tokenizer = tokenizer
         self.noise_scheduler = noise_scheduler
+        self.caption_dropout_prob = caption_dropout_prob
 
         # Default sampling config if none provided
         self.timestep_sampling_config = timestep_sampling_config or {"weighting_scheme": "cosmap"}
@@ -46,8 +48,15 @@ class ZImageWrapper(nn.Module):
         """
         # 1. Text Encode
         with torch.no_grad():
+            # Caption Dropout
+            if self.training and self.caption_dropout_prob > 0:
+                prompts = [
+                    "" if random.random() < self.caption_dropout_prob else p
+                    for p in prompts
+                ]
+
             prompt_embeds, _ = self.text_encoding_pipeline.encode_prompt(
-                prompts, max_sequence_length=64, device=device
+                prompts, max_sequence_length=64, device=device, do_classifier_free_guidance=False
             )
 
         # 2. VAE Encode

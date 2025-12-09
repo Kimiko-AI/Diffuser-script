@@ -14,6 +14,9 @@ lr_warmup_steps: 50
 mixed_precision: "bf16"
 gradient_accumulation_steps: 1
 gradient_checkpointing: true
+use_ema: true
+ema_decay: 0.9999
+ema_update_after_step: 0
 resume_from_checkpoint: "latest" # "latest" or path to checkpoint directory
 checkpointing_steps: 1000
 # Data (WebDataset)
@@ -36,6 +39,7 @@ pretrained_model_name_or_path: "Tongyi-MAI/Z-Image-Turbo"
 text_encoder_path: "Tongyi-MAI/Z-Image-Turbo"
 vae_path: "Tongyi-MAI/Z-Image-Turbo"
 transformer_class_path: "diffusers.ZImageTransformer2DModel"
+caption_dropout_prob: 0.1
 model_config: false
 #model_config:
 #    all_f_patch_size:

@@ -29,11 +29,15 @@ Trained on {base_model}.
     populate_model_card(model_card, tags=["text-to-image", "lumina2"]).save(os.path.join(repo_folder, "README.md"))
 
 
-def log_validation(accelerator, model_wrapper, args, global_step):
+def log_validation(accelerator, model_wrapper, args, global_step, ema_model=None):
     logger.info(f"Running validation... Prompt: {args.validation_prompt}")
 
     # Unwrap the wrapper if it's wrapped by accelerator (DDP)
     unwrapped_wrapper = accelerator.unwrap_model(model_wrapper)
+
+    if ema_model is not None:
+        ema_model.store(unwrapped_wrapper.transformer.parameters())
+        ema_model.copy_to(unwrapped_wrapper.transformer.parameters())
 
     # Run inference using the wrapper's generate method
     images = unwrapped_wrapper.generate(
@@ -44,6 +48,9 @@ def log_validation(accelerator, model_wrapper, args, global_step):
         seed=args.seed,
         device=accelerator.device
     )
+
+    if ema_model is not None:
+        ema_model.restore(unwrapped_wrapper.transformer.parameters())
 
     for tracker in accelerator.trackers:
         if tracker.name == "tensorboard":
