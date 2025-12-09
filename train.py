@@ -151,6 +151,10 @@ def main():
             accelerator.print(f"Resuming from checkpoint {path}")
             accelerator.load_state(os.path.join(args.output_dir, path))
             global_step = int(path.split("-")[1])
+            
+            # Ensure EMA model is on the correct device after loading state
+            if getattr(args, "use_ema", False) and ema_model is not None:
+                ema_model.to(accelerator.device)
 
     progress_bar = tqdm(range(global_step, args.max_train_steps), disable=not accelerator.is_local_main_process)
     progress_bar.set_description("Steps")
