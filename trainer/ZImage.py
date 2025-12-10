@@ -8,42 +8,29 @@ from diffusers.training_utils import compute_density_for_timestep_sampling
 
 
 class ZImageWrapper(nn.Module):
-    def __init__(
-            self,
-            transformer: nn.Module,
-            vae: nn.Module,
-            text_encoder: nn.Module,
-            tokenizer: Any,
-            noise_scheduler: Any,
-            timestep_sampling_config: Optional[Dict[str, Any]] = None,
-            caption_dropout_prob: float = 0.0,
-            afm_lambda: float = 0.05,  # Default lambda from the AFM paper [cite: 167, 249]
-    ):
+    def __init__(self, transformer, vae, text_encoder, tokenizer, noise_scheduler, timestep_sampling_config=None, caption_dropout_prob=0.0):
         super().__init__()
         self.transformer = transformer
-        self.vae = vae
-        self.text_encoder = text_encoder
+        # Use lists to prevent nn.Module from registering them as submodules
+        # This prevents them from being saved in the state_dict
+        self._vae = [vae]
+        self._text_encoder = [text_encoder]
         self.tokenizer = tokenizer
         self.noise_scheduler = noise_scheduler
         self.caption_dropout_prob = caption_dropout_prob
-        self.afm_lambda = afm_lambda
 
-        # Configuration defaults
-        self.sampling_config = timestep_sampling_config or {
-            "weighting_scheme": "cosmap",
-            "logit_mean": 0.0,
-            "logit_std": 1.0,
-            "mode_scale": 1.29,
-        }
+        # Default sampling config if none provided
+        self.timestep_sampling_config = timestep_sampling_config or {"weighting_scheme": "cosmap"}
 
-        # Freeze static components
+        # Freeze frozen components
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
 
-        # Enable training for transformer
+        # Ensure transformer is in train mode by default
         self.transformer.train().to(torch.bfloat16)
 
-        # Helper pipeline for text encoding
+        # Helper pipeline for encoding text during training
+        # We pass transformer=None because we only use it for encode_prompt
         self.text_encoding_pipeline = ZImagePipeline(
             vae=self.vae,
             text_encoder=self.text_encoder,
@@ -52,13 +39,26 @@ class ZImageWrapper(nn.Module):
             scheduler=None
         )
 
-    def forward(
-            self,
-            pixel_values: torch.Tensor,
-            prompts: List[str],
-            device: torch.device,
-            weight_dtype: torch.dtype = torch.float32
-    ) -> torch.Tensor:
+    @property
+    def vae(self):
+        return self._vae[0]
+
+    @property
+    def text_encoder(self):
+        return self._text_encoder[0]
+
+    def load_state_dict(self, state_dict, strict=True):
+        # Filter out vae and text_encoder keys from the state_dict
+        # This ensures that resuming from checkpoints that included them (old behavior) 
+        # doesn't cause "Unexpected key(s)" errors.
+        new_state_dict = {
+            k: v for k, v in state_dict.items()
+            if not k.startswith("vae.") and not k.startswith("text_encoder.") and 
+               not k.startswith("_vae.") and not k.startswith("_text_encoder.")
+        }
+        return super().load_state_dict(new_state_dict, strict=strict)
+
+    def forward(self, pixel_values, prompts, device, weight_dtype=torch.float32):
 
         # --- 1. Encode Text ---
         with torch.no_grad():
