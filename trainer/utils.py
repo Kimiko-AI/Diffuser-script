@@ -30,7 +30,11 @@ Trained on {base_model}.
 
 
 def log_validation(accelerator, model_wrapper, args, global_step, ema_model=None):
-    logger.info(f"Running validation... Prompt: {args.validation_prompt}")
+    validation_prompts = args.validation_prompt
+    if isinstance(validation_prompts, str):
+        validation_prompts = [validation_prompts]
+
+    logger.info(f"Running validation... Prompts: {validation_prompts}")
 
     # Unwrap the wrapper if it's wrapped by accelerator (DDP)
     unwrapped_wrapper = accelerator.unwrap_model(model_wrapper)
@@ -39,28 +43,42 @@ def log_validation(accelerator, model_wrapper, args, global_step, ema_model=None
         ema_model.store(unwrapped_wrapper.transformer.parameters())
         ema_model.copy_to(unwrapped_wrapper.transformer.parameters())
 
-    # Run inference using the wrapper's generate method
-    images = unwrapped_wrapper.generate(
-        prompt=args.validation_prompt,
-        num_inference_steps=20,
-        guidance_scale=4.0,
-        num_images=args.num_validation_images,
-        seed=args.seed,
-        device=accelerator.device
-    )
+    all_images = []
+    
+    # Generate for each prompt
+    for prompt_idx, prompt in enumerate(validation_prompts):
+        # Run inference using the wrapper's generate method
+        # Infer num_validation_images from number of prompts (1 per prompt)
+        images = unwrapped_wrapper.generate(
+            prompt=prompt,
+            num_inference_steps=20,
+            guidance_scale=4.0,
+            num_images=1,
+            seed=args.seed,
+            device=accelerator.device
+        )
+        
+        # Collect for consolidated logging
+        for img in images:
+            all_images.append((prompt, img))
+
+        # Tensorboard logging per prompt group
+        for tracker in accelerator.trackers:
+            if tracker.name == "tensorboard":
+                np_images = np.stack([np.asarray(img) for img in images])
+                tracker.writer.add_images(f"validation/prompt_{prompt_idx}", np_images, global_step, dataformats="NHWC")
 
     if ema_model is not None:
         ema_model.restore(unwrapped_wrapper.transformer.parameters())
 
+    # Consolidated WandB logging
     for tracker in accelerator.trackers:
-        if tracker.name == "tensorboard":
-            np_images = np.stack([np.asarray(img) for img in images])
-            tracker.writer.add_images("validation", np_images, global_step, dataformats="NHWC")
         if tracker.name == "wandb":
             tracker.log(
                 {
                     "validation": [
-                        wandb.Image(image, caption=f"{i}: {args.validation_prompt}") for i, image in enumerate(images)
+                        wandb.Image(image, caption=f"{i}: {prompt}") 
+                        for i, (prompt, image) in enumerate(all_images)
                     ]
                 }
             )
@@ -68,4 +86,4 @@ def log_validation(accelerator, model_wrapper, args, global_step, ema_model=None
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    return images
+    return [img for _, img in all_images]
