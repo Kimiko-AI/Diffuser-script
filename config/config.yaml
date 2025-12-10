@@ -26,8 +26,9 @@ ema_decay: 0.9999
 ema_update_after_step: 0
 resume_from_checkpoint: "latest" # "latest" or path to checkpoint directory
 checkpointing_steps: 1000
+checkpoints_total_limit: 3
 # Data (WebDataset)
-data_url: "pipe:curl -s -L https://huggingface.co/datasets/deepghs/danbooru-wdtagger-v4ex-w640-ws-full/resolve/main/train/00{{001..213}}.tar -H 'Authorization:Bearer '"
+data_url: "pipe:curl -s -L https://huggingface.co/datasets/DSULT-Alya/Renai-Circulation-bucketized-crossing-field/resolve/main/0000/bucket_00{{00..99}}_000000.tar -H 'Authorization:Bearer '"
 resolution: 256 # Base resolution (int or [w, h])
 bucket_step_size: 32
 train_batch_size: 32

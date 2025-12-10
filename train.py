@@ -2,6 +2,7 @@
 import argparse
 import yaml
 import os
+import shutil
 import torch
 import torch.nn.functional as F
 from accelerate import Accelerator
@@ -205,6 +206,27 @@ def main():
                         base_model=args.pretrained_model_name_or_path or "scratch",
                         repo_folder=save_path
                     )
+
+                    # Rotation: Keep only the latest N checkpoints
+                    if getattr(args, "checkpoints_total_limit", None) is not None:
+                        limit = int(args.checkpoints_total_limit)
+                        checkpoints = os.listdir(args.output_dir)
+                        # Filter for checkpoint folders
+                        checkpoints = [d for d in checkpoints if d.startswith("checkpoint-")]
+                        # Sort by step number
+                        try:
+                            checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))
+                            
+                            if len(checkpoints) > limit:
+                                num_to_remove = len(checkpoints) - limit
+                                removing_checkpoints = checkpoints[:num_to_remove]
+                                for rc in removing_checkpoints:
+                                    full_path = os.path.join(args.output_dir, rc)
+                                    if os.path.isdir(full_path):
+                                        shutil.rmtree(full_path)
+                                        logger.info(f"Removed old checkpoint {rc} to respect total_limit={limit}")
+                        except Exception as e:
+                            logger.warning(f"Error during checkpoint rotation: {e}")
 
                 if global_step % args.validation_steps == 0:
                     # Unwrap for validation not needed here as log_validation handles unwrap or receives wrapper
