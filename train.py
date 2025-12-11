@@ -84,7 +84,8 @@ def main():
         tokenizer=tokenizer,
         noise_scheduler=noise_scheduler,
         timestep_sampling_config=timestep_sampling_config,
-        caption_dropout_prob=getattr(args, "caption_dropout_prob", 0.0)
+        caption_dropout_prob=getattr(args, "caption_dropout_prob", 0.0),
+        afm_lambda=getattr(args, "afm_lambda", 0.0)
     )
     
     if args.gradient_checkpointing:
@@ -179,7 +180,7 @@ def main():
 
             accelerator.backward(loss)
             if accelerator.sync_gradients:
-                accelerator.clip_grad_norm_(model_wrapper.module.transformer.parameters() if hasattr(model_wrapper, "module") else model_wrapper.transformer.parameters(), 1.0)
+                accelerator.clip_grad_norm_(model_wrapper.module.transformer.parameters() if hasattr(model_wrapper, "module") else model_wrapper.transformer.parameters(), args.max_grad_norm)
 
             optimizer.step()
             lr_scheduler.step()

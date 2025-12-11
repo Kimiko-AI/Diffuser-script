@@ -1,12 +1,13 @@
 import webdataset as wds
 import torch
+import torch.distributed as dist
+import os
 import torchvision.transforms as transforms
 from PIL import Image
 import numpy as np
 from functools import partial
 import logging
 
-logger = logging.getLogger(__name__)
 
 def generate_buckets(base_width, base_height, step_size=32):
     # Generate bucket sizes based on the formula (BASE_WIDTH - STEP_SIZE * n, BASE_HEIGHT + STEP_SIZE * n)
@@ -81,9 +82,20 @@ def transform_sample(sample):
                         all_rating.extend(extract_names(t.get("rating", [])))
 
                 parts.extend(all_rating)
-                content_tags = all_character + all_general
-                np.random.shuffle(content_tags)
-                parts.extend(content_tags)
+
+                # 1. 20% chance to drop ALL character tags
+                if all_character and np.random.random() < 0.2:
+                    all_character = []
+                
+                parts.extend(all_character)
+
+                # 2. General tags processing
+                np.random.shuffle(all_general)
+                if len(all_general) > 3:
+                    keep_count = np.random.randint(3, len(all_general) + 1)
+                    all_general = all_general[:keep_count]
+                
+                parts.extend(all_general)
 
             # Fallback to old structure
             else:
@@ -100,15 +112,21 @@ def transform_sample(sample):
                 # Add rating (usually kept at start)
                 parts.extend(process_tags(rating))
 
-                # Shuffle character and general tags for robustness
                 char_parts = process_tags(character_tags)
                 gen_parts = process_tags(general_tags)
+                
+                # Apply same logic to fallback structure
+                if char_parts and np.random.random() < 0.2:
+                    char_parts = []
+                
+                parts.extend(char_parts)
 
-                # Combine char and gen tags
-                all_tags = char_parts + gen_parts
-                np.random.shuffle(all_tags)
+                np.random.shuffle(gen_parts)
+                if len(gen_parts) > 3:
+                    keep_count = np.random.randint(3, len(gen_parts) + 1)
+                    gen_parts = gen_parts[:keep_count]
 
-                parts.extend(all_tags)
+                parts.extend(gen_parts)
 
             prompt = " ".join(parts)[:512] # Truncate to 512 chars (or tokens approximately)
         else:

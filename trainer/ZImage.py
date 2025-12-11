@@ -8,7 +8,7 @@ from diffusers.training_utils import compute_density_for_timestep_sampling
 
 
 class ZImageWrapper(nn.Module):
-    def __init__(self, transformer, vae, text_encoder, tokenizer, noise_scheduler, timestep_sampling_config=None, caption_dropout_prob=0.0):
+    def __init__(self, transformer, vae, text_encoder, tokenizer, noise_scheduler, timestep_sampling_config=None, caption_dropout_prob=0.0, afm_lambda=0.0):
         super().__init__()
         self.transformer = transformer
         # Use lists to prevent nn.Module from registering them as submodules
@@ -18,6 +18,7 @@ class ZImageWrapper(nn.Module):
         self.tokenizer = tokenizer
         self.noise_scheduler = noise_scheduler
         self.caption_dropout_prob = caption_dropout_prob
+        self.afm_lambda = afm_lambda
 
         # Default sampling config if none provided
         self.timestep_sampling_config = timestep_sampling_config or {"weighting_scheme": "cosmap"}
@@ -82,7 +83,7 @@ class ZImageWrapper(nn.Module):
         # Sample timesteps using the config
         u = compute_density_for_timestep_sampling(
             batch_size=bsz,
-            **self.sampling_config
+            **self.timestep_sampling_config
         ).to(device)
 
         # Interpolate: x_t = (1 - u) * noise + u * x_1
