@@ -85,7 +85,8 @@ def main():
         noise_scheduler=noise_scheduler,
         timestep_sampling_config=timestep_sampling_config,
         caption_dropout_prob=getattr(args, "caption_dropout_prob", 0.0),
-        afm_lambda=getattr(args, "afm_lambda", 0.0)
+        afm_lambda=getattr(args, "afm_lambda", 0.0),
+        consistency_lambda=getattr(args, "consistency_lambda", 1.0)
     )
     
     if args.gradient_checkpointing:
@@ -105,7 +106,7 @@ def main():
         accelerator.register_for_checkpointing(ema_model)
 
     # Optimizer (optimize only transformer parameters)
-    optimizer = bnb.optim.Adam8bit(
+    optimizer = torch.optim.AdamW(
         model_wrapper.transformer.parameters(), lr=args.learning_rate, weight_decay=1e-2
     )
 
@@ -174,9 +175,16 @@ def main():
         with accelerator.accumulate(model_wrapper):
             images = batch["pixels"].to(accelerator.device, dtype=weight_dtype)
             prompts = batch["prompts"]
+            full_prompts = batch["full_prompts"] # Get full prompts
             
             # Forward pass through wrapper
-            loss = model_wrapper(images, prompts, accelerator.device, weight_dtype)
+            loss = model_wrapper(
+                pixel_values=images, 
+                prompts=prompts, 
+                device=accelerator.device, 
+                paraphrased_prompts=full_prompts, # Pass full prompts as paraphrases
+                weight_dtype=weight_dtype
+            )
 
             accelerator.backward(loss)
             if accelerator.sync_gradients:

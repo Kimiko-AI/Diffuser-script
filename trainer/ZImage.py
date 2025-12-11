@@ -8,7 +8,7 @@ from diffusers.training_utils import compute_density_for_timestep_sampling
 
 
 class ZImageWrapper(nn.Module):
-    def __init__(self, transformer, vae, text_encoder, tokenizer, noise_scheduler, timestep_sampling_config=None, caption_dropout_prob=0.0, afm_lambda=0.0):
+    def __init__(self, transformer, vae, text_encoder, tokenizer, noise_scheduler, timestep_sampling_config=None, caption_dropout_prob=0.0, afm_lambda=0.0, consistency_lambda=1.0):
         super().__init__()
         self.transformer = transformer
         # Use lists to prevent nn.Module from registering them as submodules
@@ -19,6 +19,7 @@ class ZImageWrapper(nn.Module):
         self.noise_scheduler = noise_scheduler
         self.caption_dropout_prob = caption_dropout_prob
         self.afm_lambda = afm_lambda
+        self.consistency_lambda = consistency_lambda
 
         # Default sampling config if none provided
         self.timestep_sampling_config = timestep_sampling_config or {"weighting_scheme": "cosmap"}
@@ -59,16 +60,38 @@ class ZImageWrapper(nn.Module):
         }
         return super().load_state_dict(new_state_dict, strict=strict)
 
-    def forward(self, pixel_values, prompts, device, weight_dtype=torch.float32):
+    def forward(
+        self, 
+        pixel_values, 
+        prompts, 
+        device, 
+        paraphrased_prompts: Optional[List[str]] = None, 
+        weight_dtype=torch.float32,
+        consistency_lambda: float = None # Allow override
+    ):
+        # Use instance default if not provided
+        if consistency_lambda is None:
+            consistency_lambda = self.consistency_lambda
 
-        # --- 1. Encode Text ---
+        # --- 1. Encode Text (Original) ---
         with torch.no_grad():
             if self.training and self.caption_dropout_prob > 0:
-                prompts = ["" if random.random() < self.caption_dropout_prob else p for p in prompts]
+                # Apply dropout to main prompts
+                prompts_in = ["" if random.random() < self.caption_dropout_prob else p for p in prompts]
+            else:
+                prompts_in = prompts
 
             prompt_embeds, _ = self.text_encoding_pipeline.encode_prompt(
-                prompts, max_sequence_length=64, device=device, do_classifier_free_guidance=False
+                prompts_in, max_sequence_length=64, device=device, do_classifier_free_guidance=False
             )
+            
+            # --- Encode Paraphrased Text (Positive Pair) ---
+            prompt_embeds_pos = None
+            if paraphrased_prompts is not None:
+                # Usually we don't apply dropout to the positive pair consistency check
+                prompt_embeds_pos, _ = self.text_encoding_pipeline.encode_prompt(
+                    paraphrased_prompts, max_sequence_length=64, device=device, do_classifier_free_guidance=False
+                )
 
         # --- 2. Encode Images (VAE) ---
         with torch.no_grad():
@@ -79,22 +102,17 @@ class ZImageWrapper(nn.Module):
         # --- 3. Prepare Flow Matching ---
         bsz = latents.shape[0]
         noise = torch.randn_like(latents)
-
-        # Sample timesteps using the config
+        
         u = compute_density_for_timestep_sampling(
             batch_size=bsz,
             **self.timestep_sampling_config
         ).to(device)
-
-        # Interpolate: x_t = (1 - u) * noise + u * x_1
-        # This matches the paper's optimal transport path where u goes 0 -> 1
+        
         sigmas_view = u.view(bsz, 1, 1, 1)
         noisy_latents = (1.0 - sigmas_view) * noise + sigmas_view * latents
-
-        # --- 4. Model Prediction ---
-        # Reshape for transformer input as needed
         noisy_latents_input = list(noisy_latents.unsqueeze(2).unbind(dim=0))
 
+        # --- 4. Model Prediction (Anchor) ---
         model_pred = self.transformer(
             noisy_latents_input,
             u.flatten(),
@@ -103,31 +121,38 @@ class ZImageWrapper(nn.Module):
         )[0]
         model_pred = torch.stack(model_pred, dim=0).squeeze(2)
 
-        # --- 5. Calculate Loss (AFM) ---
-        # Target velocity v = x_1 - x_0 (latents - noise)
+        # --- 5. Calculate Standard Losses ---
         target = latents - noise
-
-        # Standard Flow Matching Loss (Minimize distance to correct flow)
         loss_fm = F.mse_loss(model_pred.float(), target.float())
+        
+        loss = loss_fm
 
-        # Contrastive Regularization (Maximize distance from incorrect flows)
+        # --- 6. Positive Pair Consistency (The requested feature) ---
+        # If we have paraphrases, force the model to predict similar flows for both prompts
+        if prompt_embeds_pos is not None:
+             model_pred_pos = self.transformer(
+                noisy_latents_input, # Same noisy input
+                u.flatten(),         # Same timestep
+                prompt_embeds_pos,   # Different (paraphrased) text
+                return_dict=False
+            )[0]
+             model_pred_pos = torch.stack(model_pred_pos, dim=0).squeeze(2)
+             
+             # Minimize distance between Anchor Flow and Positive Flow
+             loss_consistency = F.mse_loss(model_pred.float(), model_pred_pos.float())
+             loss = loss + (consistency_lambda * loss_consistency)
+
+        # --- 7. Negative Pair Contrastive (AFM from Paper) ---
+        # The paper emphasizes this part: steering AWAY from wrong conditions
         if self.afm_lambda > 0 and bsz > 1:
-            # We must sample neg_latents != latents.
-            # rolling the batch by 1 guarantees every sample is paired with a different sample.
             neg_latents = torch.roll(latents, shifts=1, dims=0)
             neg_noise = torch.roll(noise, shifts=1, dims=0)
-
-            # The flow vector for the negative pair
             neg_target = neg_latents - neg_noise
-
-            # Calculate MSE for negative pairs
+            
+            # Note: The paper maximizes distance to NEGATIVE flow [cite: 48, 128]
+            # This is mathematically equivalent to minimizing the negative of the distance
             loss_contrastive = F.mse_loss(model_pred.float(), neg_target.float())
-
-            # Objective: Minimize FM loss, Maximize Contrastive Loss
-            # L_total = L_fm - lambda * L_contrastive
-            loss = loss_fm - (self.afm_lambda * loss_contrastive)
-        else:
-            loss = loss_fm
+            loss = loss - (self.afm_lambda * loss_contrastive)
 
         return loss
 

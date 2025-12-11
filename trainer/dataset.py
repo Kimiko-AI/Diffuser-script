@@ -56,11 +56,14 @@ def transform_sample(sample):
     # Handle prompts
     # Assuming 'json' or 'txt' or 'caption'
     prompt = ""
+    full_prompt = ""
+    
     if "json" in sample:
         json_data = sample["json"]
         # User specific tag logic from previous file
         if isinstance(json_data, dict):
             parts = []
+            full_parts = []
 
             # Check for new structure (Pixiv/Tagger format)
             if "tags" in json_data and isinstance(json_data["tags"], list):
@@ -81,18 +84,27 @@ def transform_sample(sample):
                         all_character.extend(extract_names(t.get("character", [])))
                         all_rating.extend(extract_names(t.get("rating", [])))
 
+                # Full Prompt Construction
+                full_parts.extend(all_rating)
+                full_content_tags = all_character + all_general
+                np.random.shuffle(full_content_tags)
+                full_parts.extend(full_content_tags)
+                full_prompt = " ".join(full_parts)[:512]
+
+                # Dropped Prompt Construction
                 parts.extend(all_rating)
 
-                # 1. 20% chance to drop ALL character tags
-                if all_character and np.random.random() < 0.2:
+                # 1. Aggressive: 40% chance to drop ALL character tags
+                if all_character and np.random.random() < 0.4:
                     all_character = []
                 
                 parts.extend(all_character)
 
-                # 2. General tags processing
+                # 2. Aggressive: General tags processing
                 np.random.shuffle(all_general)
-                if len(all_general) > 3:
-                    keep_count = np.random.randint(3, len(all_general) + 1)
+                # Keep fewer tags: random between 1 and len
+                if len(all_general) > 1:
+                    keep_count = np.random.randint(1, len(all_general) + 1)
                     all_general = all_general[:keep_count]
                 
                 parts.extend(all_general)
@@ -111,34 +123,46 @@ def transform_sample(sample):
 
                 # Add rating (usually kept at start)
                 parts.extend(process_tags(rating))
+                full_parts.extend(process_tags(rating))
 
                 char_parts = process_tags(character_tags)
                 gen_parts = process_tags(general_tags)
                 
-                # Apply same logic to fallback structure
-                if char_parts and np.random.random() < 0.2:
+                # Full Prompt
+                all_tags_full = char_parts + gen_parts
+                np.random.shuffle(all_tags_full)
+                full_parts.extend(all_tags_full)
+                full_prompt = " ".join(full_parts)[:512]
+
+                # Dropped Prompt
+                # Aggressive drop logic
+                if char_parts and np.random.random() < 0.4:
                     char_parts = []
                 
                 parts.extend(char_parts)
 
                 np.random.shuffle(gen_parts)
-                if len(gen_parts) > 3:
-                    keep_count = np.random.randint(3, len(gen_parts) + 1)
+                if len(gen_parts) > 1:
+                    keep_count = np.random.randint(1, len(gen_parts) + 1)
                     gen_parts = gen_parts[:keep_count]
 
                 parts.extend(gen_parts)
 
-            prompt = " ".join(parts)[:512] # Truncate to 512 chars (or tokens approximately)
+            prompt = " ".join(parts)[:512] 
         else:
             prompt = str(json_data)
+            full_prompt = prompt
     elif "txt" in sample:
         prompt = sample["txt"]
+        full_prompt = prompt
     elif "caption" in sample:
         prompt = sample["caption"]
+        full_prompt = prompt
 
     return {
         "image": image,
         "prompts": prompt,
+        "full_prompts": full_prompt,
         "key": sample.get("__key__", "unknown")
     }
 
@@ -164,14 +188,16 @@ def bucket_batcher(data_stream, batch_size=1, bucket_sizes=None, bucket_ratios=N
 
             buckets[b_idx].append({
                 "pixels": image_tensor,
-                "prompts": sample["prompts"]
+                "prompts": sample["prompts"],
+                "full_prompts": sample["full_prompts"]
             })
 
             if len(buckets[b_idx]) >= batch_size:
                 batch = buckets[b_idx]
                 yield {
                     "pixels": torch.stack([x["pixels"] for x in batch]),
-                    "prompts": [x["prompts"] for x in batch]
+                    "prompts": [x["prompts"] for x in batch],
+                    "full_prompts": [x["full_prompts"] for x in batch]
                 }
                 buckets[b_idx] = []
 
