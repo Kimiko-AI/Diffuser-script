@@ -36,7 +36,7 @@ data_url: "/workspace/test/anime/train/000{01..13}.tar"
 resolution: 256 # Base resolution (int or [w, h])
 bucket_step_size: 32
 train_batch_size: 32
-dataloader_num_workers: 2
+dataloader_num_workers: 8
 max_train_steps: 100000
 
 # Timestep Sampling
