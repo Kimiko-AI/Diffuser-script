@@ -150,11 +150,11 @@ class ZImageWrapper(nn.Module):
         if self.afm_lambda > 0 and bsz > 1:
             neg_latents = torch.roll(latents, shifts=1, dims=0)
             neg_noise = torch.roll(noise, shifts=1, dims=0)
-            neg_target = (neg_latents - neg_noise).detach()
+            neg_target = (neg_latents - neg_noise)
             
             # Note: The paper maximizes distance to NEGATIVE flow [cite: 48, 128]
             # This is mathematically equivalent to minimizing the negative of the distance
-            loss_contrastive = F.mse_loss(model_pred.float(), neg_target.float())
+            loss_contrastive = F.mse_loss(model_pred.detach().float(), neg_target.float())
             loss = loss - (self.afm_lambda * loss_contrastive)
 
         return loss
