@@ -139,7 +139,10 @@ class ZImageWrapper(nn.Module):
              model_pred_pos = torch.stack(model_pred_pos, dim=0).squeeze(2)
              
              # Minimize distance between Anchor Flow and Positive Flow
-             loss_consistency = F.mse_loss(model_pred.float(), model_pred_pos.float())
+             loss_consistency = F.mse_loss(
+                 model_pred.detach().float(),
+                 model_pred_pos.float()
+             )
              loss = loss + (consistency_lambda * loss_consistency)
 
         # --- 7. Negative Pair Contrastive (AFM from Paper) ---
@@ -147,7 +150,7 @@ class ZImageWrapper(nn.Module):
         if self.afm_lambda > 0 and bsz > 1:
             neg_latents = torch.roll(latents, shifts=1, dims=0)
             neg_noise = torch.roll(noise, shifts=1, dims=0)
-            neg_target = neg_latents - neg_noise
+            neg_target = (neg_latents - neg_noise).detach()
             
             # Note: The paper maximizes distance to NEGATIVE flow [cite: 48, 128]
             # This is mathematically equivalent to minimizing the negative of the distance

@@ -180,7 +180,7 @@ def main():
             # Forward pass through wrapper
             loss = model_wrapper(
                 pixel_values=images, 
-                prompts=prompts, 
+                prompts=prompts,
                 device=accelerator.device, 
                 paraphrased_prompts=full_prompts, # Pass full prompts as paraphrases
                 weight_dtype=weight_dtype
