@@ -7,6 +7,79 @@ from diffusers import ZImagePipeline
 from diffusers.training_utils import compute_density_for_timestep_sampling
 
 
+class LayerNorm(nn.Module):
+    r""" LayerNorm that supports two data formats: channels_last (default) or channels_first. 
+    The ordering of the dimensions in the inputs. channels_last corresponds to inputs with 
+    shape (batch_size, height, width, channels) while channels_first corresponds to inputs 
+    with shape (batch_size, channels, height, width).
+    """
+    def __init__(self, normalized_shape, eps=1e-6, data_format="channels_last"):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(normalized_shape))
+        self.bias = nn.Parameter(torch.zeros(normalized_shape))
+        self.eps = eps
+        self.data_format = data_format
+        if self.data_format not in ["channels_last", "channels_first"]:
+            raise NotImplementedError 
+        self.normalized_shape = (normalized_shape, )
+    
+    def forward(self, x):
+        if self.data_format == "channels_last":
+            return F.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
+        elif self.data_format == "channels_first":
+            u = x.mean(1, keepdim=True)
+            s = (x - u).pow(2).mean(1, keepdim=True)
+            x = (x - u) / torch.sqrt(s + self.eps)
+            x = self.weight[:, None, None] * x + self.bias[:, None, None]
+            return x
+
+class ConvNeXtBlock(nn.Module):
+    r""" ConvNeXt Block. There are two equivalent implementations:
+    (1) DwConv -> LayerNorm (channels_first) -> 1x1 Conv -> GELU -> 1x1 Conv; all in (N, C, H, W)
+    (2) DwConv -> Permute to (N, H, W, C); LayerNorm (channels_last) -> Linear -> GELU -> Linear; Permute back
+    We use (2) as we normally use standard PyTorch LayerNorm (channels_last).
+    """
+    def __init__(self, dim, drop_path=0.0, layer_scale_init_value=1e-6):
+        super().__init__()
+        self.dwconv = nn.Conv2d(dim, dim, kernel_size=7, padding=3, groups=dim) # depthwise conv
+        self.norm = LayerNorm(dim, eps=1e-6)
+        self.pwconv1 = nn.Linear(dim, 4 * dim) # pointwise/1x1 convs, implemented with linear layers
+        self.act = nn.GELU()
+        self.pwconv2 = nn.Linear(4 * dim, dim)
+        self.gamma = nn.Parameter(layer_scale_init_value * torch.ones((dim)), 
+                                    requires_grad=True) if layer_scale_init_value > 0 else None
+        
+    def forward(self, x):
+        input = x
+        x = self.dwconv(x)
+        x = x.permute(0, 2, 3, 1) # (N, C, H, W) -> (N, H, W, C)
+        x = self.norm(x)
+        x = self.pwconv1(x)
+        x = self.act(x)
+        x = self.pwconv2(x)
+        if self.gamma is not None:
+            x = self.gamma * x
+        x = x.permute(0, 3, 1, 2) # (N, H, W, C) -> (N, C, H, W)
+
+        x = input + x
+        return x
+
+class Refiner(nn.Module):
+    def __init__(self, in_channels, out_channels, dim=128, depth=2):
+        super().__init__()
+        self.proj_in = nn.Conv2d(in_channels, dim, kernel_size=1)
+        self.blocks = nn.Sequential(*[
+            ConvNeXtBlock(dim=dim) for _ in range(depth)
+        ])
+        self.proj_out = nn.Conv2d(dim, out_channels, kernel_size=1)
+        
+    def forward(self, x):
+        x = self.proj_in(x)
+        x = self.blocks(x)
+        x = self.proj_out(x)
+        return x
+
+
 class ZImageWrapper(nn.Module):
     def __init__(self, transformer, vae, text_encoder, tokenizer, noise_scheduler, timestep_sampling_config=None, caption_dropout_prob=0.0, afm_lambda=0.0, consistency_lambda=1.0):
         super().__init__()
@@ -30,6 +103,13 @@ class ZImageWrapper(nn.Module):
 
         # Ensure transformer is in train mode by default
         self.transformer.train().to(torch.bfloat16)
+        
+        # Initialize Refiner
+        # Latent channels usually 4 or 16. transformer output matches it.
+        latent_channels = self.vae.config.latent_channels
+        # Input to refiner: transformer output + noisy latent
+        self.refiner = Refiner(in_channels=latent_channels * 2, out_channels=latent_channels)
+        self.refiner.train().to(torch.bfloat16)
 
         # Helper pipeline for encoding text during training
         # We pass transformer=None because we only use it for encode_prompt
@@ -120,6 +200,12 @@ class ZImageWrapper(nn.Module):
             return_dict=False
         )[0]
         model_pred = torch.stack(model_pred, dim=0).squeeze(2)
+        
+        # --- Apply Refiner ---
+        # Concatenate transformer output and noisy latent
+        refiner_input = torch.cat([model_pred, noisy_latents], dim=1)
+        refiner_delta = self.refiner(refiner_input)
+        model_pred = model_pred + refiner_delta
 
         # --- 5. Calculate Standard Losses ---
         target = latents - noise
@@ -137,6 +223,11 @@ class ZImageWrapper(nn.Module):
                 return_dict=False
             )[0]
              model_pred_pos = torch.stack(model_pred_pos, dim=0).squeeze(2)
+             
+             # Apply Refiner to Positive Pair too
+             refiner_input_pos = torch.cat([model_pred_pos, noisy_latents], dim=1)
+             refiner_delta_pos = self.refiner(refiner_input_pos)
+             model_pred_pos = model_pred_pos + refiner_delta_pos
              
              # Minimize distance between Anchor Flow and Positive Flow
              loss_consistency = F.mse_loss(

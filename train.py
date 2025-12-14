@@ -105,9 +105,10 @@ def main():
         ema_model.to(accelerator.device)
         accelerator.register_for_checkpointing(ema_model)
 
-    # Optimizer (optimize only transformer parameters)
+    # Optimizer (optimize transformer and refiner parameters)
+    # ZImageWrapper only registers transformer and refiner as submodules (vae/text_encoder are hidden in lists)
     optimizer = torch.optim.AdamW(
-        model_wrapper.transformer.parameters(), lr=args.learning_rate, weight_decay=1e-2
+        model_wrapper.parameters(), lr=args.learning_rate, weight_decay=1e-2
     )
 
     # Dataset (WebDataset)
@@ -188,7 +189,9 @@ def main():
 
             accelerator.backward(loss)
             if accelerator.sync_gradients:
-                accelerator.clip_grad_norm_(model_wrapper.module.transformer.parameters() if hasattr(model_wrapper, "module") else model_wrapper.transformer.parameters(), args.max_grad_norm)
+                # Clip gradients for all trainable parameters (transformer + refiner)
+                params_to_clip = model_wrapper.module.parameters() if hasattr(model_wrapper, "module") else model_wrapper.parameters()
+                accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
 
             optimizer.step()
             lr_scheduler.step()
