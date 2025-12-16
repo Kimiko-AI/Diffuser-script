@@ -3,24 +3,36 @@
 output_dir: "zimage-wds-training"
 seed: 42
 report_to: "wandb"
-validation_prompt: 
-  - "touhou rumia general 1girl d alternate_costume apron black_kimono black_skirt blonde_hair bow enmaided fang hair_between_eyes hair_bow heart heart_hands japanese_clothes kimono long_sleeves looking_at_viewer maid neck_ribbon obi obijime okobo one_eye_closed open_mouth platform_sandals red_bow red_eyes red_ribbon ribbon sandals sash short_hair simple_background skin_fang skirt smile socks solo standing standing_on_one_leg wa_maid white_apron white_background white_sash white_socks wide_sleeves yagasuri"
-  - "kantai collection akagi (kancolle) 1girl arrow (projectile) blush bow (weapon) brown eyes brown gloves brown hair gloves hair between eyes holding holding arrow japanese clothes kimono long hair looking at viewer muneate partially fingerless gloves simple background smile solo tasuki two-tone background upper body weapon white kimono yugake"
-  - "ivorye genshin impact furina (genshin impact) 1girl :d ahoge ascot blue ascot blue eyes blue hair blue hat blue jacket brooch colored inner hair gloves hat indoors jacket jewelry long sleeves looking at viewer multicolored hair open mouth short hair smile solo streaked hair top hat upper body white gloves white hair"
-  - "hiroita original 1girl animal ear fluff animal ears blinking blonde hair blue background blue bow bow brown jacket collar forest fox ears fox girl fox tail from side hair between eyes hair bow jacket leaf light rays long sleeves looking at viewer medium hair nature neck ribbon orange skirt outdoors pixel art plant pleated skirt red ribbon ribbon sidelighting skirt solo tail upper body vines white collar yellow eyes"
-  - "isobe toast original 1girl black dress black hat cloud dress flower pot from behind garden hat lined paper outdoors plant shack sky solo standing tree very wide shot window wooden door"
-  - "hua bu neng yan original 1girl bare shoulders black dress black shoes blush butterfly wings chibi chibi only closed mouth dress full body hand up insect wings long hair looking at viewer low wings pink eyes pink hair rabbit girl shoes sleeveless sleeveless dress smile solo standing standing on one leg too many watermarks twintails v watermark wings wrist cuffs"
-  - "dear arisu cardcaptor sakura original kinomoto sakura kinomoto sakura (princess costume) 1girl blush choker choppy bangs closed mouth cosplay cowboy shot dress feathered wings flat chest grey hair hands up kinomoto sakura long hair looking at viewer lying on back pink dress puffy short sleeves puffy sleeves red choker short sleeves solo star (symbol) star choker wings yellow eyes"
-  - "yuuuzu (jufan) original 1girl blue butterfly bow bug butterfly cherry blossoms closed mouth double bun eyelashes eyepatch facial mark falling petals flower hair bun hair intakes japanese clothes kimono looking at viewer one eye covered petals pink bow pink eyes pink flower pink hair pink kimono pink petals sample watermark sidelocks solo watermark"
-validation_steps: 300
+validation_prompt:
+  - "general touhou rumia general 1girl d alternate_costume apron black_kimono black_skirt blonde_hair bow enmaided fang hair_between_eyes hair_bow heart heart_hands japanese_clothes kimono long_sleeves looking_at_viewer maid neck_ribbon obi obijime okobo one_eye_closed open_mouth platform_sandals red_bow red_eyes red_ribbon ribbon sandals sash short_hair simple_background skin_fang skirt smile socks solo standing standing_on_one_leg wa_maid white_apron white_background white_sash white_socks wide_sleeves yagasuri"
+  - "general kantai collection akagi (kancolle) 1girl arrow (projectile) blush bow (weapon) brown eyes brown gloves brown hair gloves hair between eyes holding holding arrow japanese clothes kimono long hair looking at viewer muneate partially fingerless gloves simple background smile solo tasuki two-tone background upper body weapon white kimono yugake"
+  - "general ivorye genshin impact furina (genshin impact) 1girl :d ahoge ascot blue ascot blue eyes blue hair blue hat blue jacket brooch colored inner hair gloves hat indoors jacket jewelry long sleeves looking at viewer multicolored hair open mouth short hair smile solo streaked hair top hat upper body white gloves white hair"
+  - "general hiroita original 1girl animal ear fluff animal ears blinking blonde hair blue background blue bow bow brown jacket collar forest fox ears fox girl fox tail from side hair between eyes hair bow jacket leaf light rays long sleeves looking at viewer medium hair nature neck ribbon orange skirt outdoors pixel art plant pleated skirt red ribbon ribbon sidelighting skirt solo tail upper body vines white collar yellow eyes"
+  - "general isobe toast original 1girl black dress black hat cloud dress flower pot from behind garden hat lined paper outdoors plant shack sky solo standing tree very wide shot window wooden door"
+  - "general hua bu neng yan original 1girl bare shoulders black dress black shoes blush butterfly wings chibi chibi only closed mouth dress full body hand up insect wings long hair looking at viewer low wings pink eyes pink hair rabbit girl shoes sleeveless sleeveless dress smile solo standing standing on one leg too many watermarks twintails v watermark wings wrist cuffs"
+  - "general dear arisu cardcaptor sakura original kinomoto sakura kinomoto sakura (princess costume) 1girl blush choker choppy bangs closed mouth cosplay cowboy shot dress feathered wings flat chest grey hair hands up kinomoto sakura long hair looking at viewer lying on back pink dress puffy short sleeves puffy sleeves red choker short sleeves solo star (symbol) star choker wings yellow eyes"
+  - "general yuuuzu (jufan) original 1girl blue butterfly bow bug butterfly cherry blossoms closed mouth double bun eyelashes eyepatch facial mark falling petals flower hair bun hair intakes japanese clothes kimono looking at viewer one eye covered petals pink bow pink eyes pink flower pink hair pink kimono pink petals sample watermark sidelocks solo"
+  - "general touhou rumia 1girl blonde hair red eyes kimono apron maid solo looking at viewer"
+  - "general kantai collection akagi (kancolle) 1girl brown hair kimono bow weapon solo upper body"
+  - "general genshin impact furina (genshin impact) 1girl blue hair blue eyes hat jacket solo indoors"
+  - "general original fox girl 1girl fox ears fox tail kimono blonde hair forest solo"
+  - "general original 1girl black dress black hat garden very wide shot solo"
+  - "general original chibi 1girl pink hair wings dress solo full body"
+  - "general cardcaptor sakura kinomoto sakura 1girl pink dress wings solo lying"
+  - "general original 1girl pink hair kimono eyepatch butterfly solo"
+  - "general 1girl"
+  - "general 1girl red_eyes yandere"
+
+
+validation_steps: 100
 
 # Optimization
 learning_rate: 3.0e-4
-afm_lambda: 0.05
-consistency_lambda: 0.05
+afm_lambda: 0
+consistency_lambda: 0.1
 max_grad_norm: 1.0
 lr_scheduler_type: "cosine" # Options: "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
-lr_warmup_steps: 200
+lr_warmup_steps: 500
 mixed_precision: "bf16"
 gradient_accumulation_steps: 1
 gradient_checkpointing: true
@@ -28,20 +40,30 @@ use_ema: true
 ema_decay: 0.9999
 ema_update_after_step: 0
 resume_from_checkpoint: "latest" # "latest" or path to checkpoint directory
-checkpointing_steps: 1000
-checkpoints_total_limit: 3
+checkpointing_steps: 500
+checkpoints_total_limit: 6
 # Data (WebDataset)
 #data_url: "pipe:curl -s -L https://huggingface.co/datasets/DSULT-Alya/Renai-Circulation-bucketized-crossing-field/resolve/main/0000/bucket_00{{00..99}}_000000.tar -H 'Authorization:Bearer '"
-data_url: "/workspace/test/anime/train/000{01..37}.tar"
+data_url: "/workspace/shinon/anime/train/000{01..37}.tar"
 resolution: 256 # Base resolution (int or [w, h])
 bucket_step_size: 32
-train_batch_size: 64
-dataloader_num_workers: 8
-max_train_steps: 100000
+train_batch_size: 128
+dataloader_num_workers: 16
+max_train_steps: 10000
+
+model_type: "zimage" # Options: "zimage", "sana"
+
+# Sana Specific Config (Defaults)
+complex_human_instruction: "Given a user prompt, generate a high-quality image that aligns with the prompt."
+max_sequence_length: 300
+weighting_scheme: "logit_normal" # Sana default
+logit_mean: 0.0
+logit_std: 1.0
+mode_scale: 1.29
 
 # Timestep Sampling
 timestep_sampling:
-  weighting_scheme: "cosmap" # Options: "cosmap", "logit_normal", "uniform"
+  weighting_scheme: "uniform" # Options: "cosmap", "logit_normal", "uniform"
   logit_mean: 0.0
   logit_std: 1.0
   mode_scale: 1.29

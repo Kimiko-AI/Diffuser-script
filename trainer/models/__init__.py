@@ -1,0 +1,25 @@
+from .zimage_loader import load_zimage_components
+from .sana_loader import load_sana_components
+from .zimage_wrapper import ZImageWrapper
+from .sana_wrapper import SanaWrapper
+
+def load_models(args):
+    """
+    Factory function to load model components based on model_type.
+    """
+    model_type = getattr(args, "model_type", "zimage")
+    
+    if model_type == "sana":
+        return load_sana_components(args)
+    elif model_type == "zimage":
+        return load_zimage_components(args)
+    else:
+        raise ValueError(f"Unknown model_type: {model_type}")
+
+def get_model_wrapper(model_type, **kwargs):
+    if model_type == "sana":
+        return SanaWrapper(**kwargs)
+    elif model_type == "zimage":
+        return ZImageWrapper(**kwargs)
+    else:
+        raise ValueError(f"Unknown model_type: {model_type}")

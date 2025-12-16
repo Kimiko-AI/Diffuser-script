@@ -11,10 +11,11 @@ from accelerate.utils import ProjectConfiguration, set_seed
 from tqdm.auto import tqdm
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import compute_density_for_timestep_sampling, EMAModel
-from trainer.dataset import get_wds_loader
-from trainer.model import load_models
+from trainer.data import get_dataloader
+from trainer.models import load_models
 from trainer.utils import log_validation, save_model_card
-from trainer.ZImage import ZImageWrapper
+from trainer.models.zimage_wrapper import ZImageWrapper
+from trainer.models.sana_wrapper import SanaWrapper
 import bitsandbytes as bnb
 
 logger = get_logger(__name__)
@@ -77,17 +78,31 @@ def main():
     
     # Create Wrapper
     timestep_sampling_config = getattr(args, "timestep_sampling", None)
-    model_wrapper = ZImageWrapper(
-        transformer=transformer,
-        vae=vae,
-        text_encoder=text_encoder,
-        tokenizer=tokenizer,
-        noise_scheduler=noise_scheduler,
-        timestep_sampling_config=timestep_sampling_config,
-        caption_dropout_prob=getattr(args, "caption_dropout_prob", 0.0),
-        afm_lambda=getattr(args, "afm_lambda", 0.0),
-        consistency_lambda=getattr(args, "consistency_lambda", 1.0)
-    )
+    model_type = getattr(args, "model_type", "zimage")
+    
+    if model_type == "sana":
+        model_wrapper = SanaWrapper(
+            transformer=transformer,
+            vae=vae,
+            text_encoder=text_encoder,
+            tokenizer=tokenizer,
+            noise_scheduler=noise_scheduler,
+            args=args
+        )
+    elif model_type == "zimage":
+        model_wrapper = ZImageWrapper(
+            transformer=transformer,
+            vae=vae,
+            text_encoder=text_encoder,
+            tokenizer=tokenizer,
+            noise_scheduler=noise_scheduler,
+            timestep_sampling_config=timestep_sampling_config,
+            caption_dropout_prob=getattr(args, "caption_dropout_prob", 0.0),
+            afm_lambda=getattr(args, "afm_lambda", 0.0),
+            consistency_lambda=getattr(args, "consistency_lambda", 1.0)
+        )
+    else:
+        raise ValueError(f"Unknown model_type: {model_type}")
     
     if args.gradient_checkpointing:
         model_wrapper.transformer.enable_gradient_checkpointing()
@@ -112,14 +127,7 @@ def main():
     )
 
     # Dataset (WebDataset)
-    dataloader = get_wds_loader(
-        url_pattern=args.data_url,
-        batch_size=args.train_batch_size,
-        num_workers=getattr(args, "dataloader_num_workers", 8),
-        is_train=True,
-        base_resolution=getattr(args, "resolution", 256),
-        bucket_step_size=getattr(args, "bucket_step_size", 32)
-    )
+    dataloader = get_dataloader(args)
 
     # Scheduler
     lr_scheduler = get_scheduler(
@@ -152,10 +160,30 @@ def main():
                 f"Checkpoint '{args.resume_from_checkpoint}' not found. Starting from scratch."
             )
         else:
-            accelerator.print(f"Resuming from checkpoint {path}")
-            accelerator.load_state(os.path.join(args.output_dir, path))
-            global_step = int(path.split("-")[1])
+            accelerator.print(f"Resuming model weights from checkpoint {path}")
+            # accelerator.load_state(os.path.join(args.output_dir, path))
+            # global_step = int(path.split("-")[1])
             
+            # Load only transformer weights
+            load_path = os.path.join(args.output_dir, path)
+            unwrapped_model = accelerator.unwrap_model(model_wrapper)
+            
+            safetensors_file = os.path.join(load_path, "diffusion_pytorch_model.safetensors")
+            bin_file = os.path.join(load_path, "diffusion_pytorch_model.bin")
+            
+            state_dict = None
+            if os.path.exists(safetensors_file):
+                from safetensors.torch import load_file
+                state_dict = load_file(safetensors_file)
+            elif os.path.exists(bin_file):
+                state_dict = torch.load(bin_file, map_location="cpu")
+            
+            if state_dict is not None:
+                m, u = unwrapped_model.transformer.load_state_dict(state_dict, strict=False)
+                accelerator.print(f"Weights loaded. Missing keys: {len(m)}, Unexpected keys: {len(u)}")
+            else:
+                accelerator.print(f"No weights found at {load_path}")
+
             # Ensure EMA model is on the correct device after loading state
             if getattr(args, "use_ema", False) and ema_model is not None:
                 ema_model.to(accelerator.device)
@@ -209,10 +237,12 @@ def main():
             if accelerator.is_main_process:
                 if global_step % args.checkpointing_steps == 0:
                     save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
-                    accelerator.save_state(save_path)
+                    # accelerator.save_state(save_path)
                     
                     # Access unwrapped transformer for saving model card info if needed
                     unwrapped_transformer = accelerator.unwrap_model(model_wrapper).transformer
+                    unwrapped_transformer.save_pretrained(save_path)
+                    
                     save_model_card(
                         repo_id=f"lumina2-step-{global_step}",
                         base_model=args.pretrained_model_name_or_path or "scratch",

@@ -143,9 +143,10 @@ class ZImageWrapper(nn.Module):
              model_pred_pos = torch.stack(model_pred_pos, dim=0).squeeze(2)
              
              # Apply Refiner to Positive Pair too
-             refiner_input_pos = torch.cat([model_pred_pos, noisy_latents], dim=1)
-             refiner_delta_pos = self.refiner(refiner_input_pos)
-             model_pred_pos = model_pred_pos + refiner_delta_pos
+             # Refiner is not initialized in __init__, so this would crash.
+             # refiner_input_pos = torch.cat([model_pred_pos, noisy_latents], dim=1)
+             # refiner_delta_pos = self.refiner(refiner_input_pos)
+             # model_pred_pos = model_pred_pos + refiner_delta_pos
              
              # Minimize distance between Anchor Flow and Positive Flow
              loss_consistency = F.mse_loss(
