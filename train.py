@@ -10,7 +10,7 @@ from accelerate.logging import get_logger
 from accelerate.utils import ProjectConfiguration, set_seed
 from tqdm.auto import tqdm
 from diffusers.optimization import get_scheduler
-from diffusers.training_utils import compute_density_for_timestep_sampling, EMAModel
+from diffusers.training_utils import compute_density_for_timestep_sampling
 from trainer.data import get_dataloader
 from trainer.models import load_models
 from trainer.utils import log_validation, save_model_card
@@ -107,19 +107,6 @@ def main():
     if args.gradient_checkpointing:
         model_wrapper.transformer.enable_gradient_checkpointing()
 
-    # EMA
-    ema_model = None
-    if getattr(args, "use_ema", False):
-        ema_model = EMAModel(
-            model_wrapper.transformer.parameters(),
-            decay=getattr(args, "ema_decay", 0.9999),
-            update_after_step=getattr(args, "ema_update_after_step", 0),
-            model_cls=type(model_wrapper.transformer),
-            model_config=model_wrapper.transformer.config,
-        )
-        ema_model.to(accelerator.device)
-        accelerator.register_for_checkpointing(ema_model)
-
     # Optimizer (optimize transformer and refiner parameters)
     # ZImageWrapper only registers transformer and refiner as submodules (vae/text_encoder are hidden in lists)
     optimizer = torch.optim.AdamW(
@@ -196,9 +183,7 @@ def main():
             else:
                 accelerator.print("No training state file found. Resuming with fresh optimizer/scheduler.")
 
-            # Ensure EMA model is on the correct device after loading state
-            if getattr(args, "use_ema", False) and ema_model is not None:
-                ema_model.to(accelerator.device)
+            # 2. Load Training State (Optimizer, Scheduler, Step)
 
     progress_bar = tqdm(range(global_step, args.max_train_steps), disable=not accelerator.is_local_main_process)
     progress_bar.set_description("Steps")
@@ -248,11 +233,6 @@ def main():
             optimizer.step()
             lr_scheduler.step()
             optimizer.zero_grad()
-
-        if getattr(args, "use_ema", False) and ema_model is not None:
-            # Unwrap model if needed to access transformer
-            unwrapped_model = accelerator.unwrap_model(model_wrapper)
-            ema_model.step(unwrapped_model.transformer.parameters())
 
         if accelerator.sync_gradients:
             global_step += 1
@@ -308,8 +288,7 @@ def main():
                         accelerator=accelerator,
                         model_wrapper=model_wrapper,
                         args=args,
-                        global_step=global_step,
-                        ema_model=ema_model
+                        global_step=global_step
                     )
 
         logs = {"loss": loss.item(), "lr": lr_scheduler.get_last_lr()[0]}

@@ -29,7 +29,7 @@ Trained on {base_model}.
     populate_model_card(model_card, tags=["text-to-image", "lumina2"]).save(os.path.join(repo_folder, "README.md"))
 
 
-def log_validation(accelerator, model_wrapper, args, global_step, ema_model=None):
+def log_validation(accelerator, model_wrapper, args, global_step):
     validation_prompts = args.validation_prompt
     if isinstance(validation_prompts, str):
         validation_prompts = [validation_prompts]
@@ -38,10 +38,6 @@ def log_validation(accelerator, model_wrapper, args, global_step, ema_model=None
 
     # Unwrap the wrapper if it's wrapped by accelerator (DDP)
     unwrapped_wrapper = accelerator.unwrap_model(model_wrapper)
-
-    if ema_model is not None:
-        ema_model.store(unwrapped_wrapper.transformer.parameters())
-        ema_model.copy_to(unwrapped_wrapper.transformer.parameters())
 
     all_images = []
     
@@ -66,9 +62,6 @@ def log_validation(accelerator, model_wrapper, args, global_step, ema_model=None
             if tracker.name == "tensorboard":
                 np_images = np.asarray(img)[None, ...] # Add batch dim
                 tracker.writer.add_images(f"validation/prompt_{i}", np_images, global_step, dataformats="NHWC")
-
-    if ema_model is not None:
-        ema_model.restore(unwrapped_wrapper.transformer.parameters())
 
     # Consolidated WandB logging
     for tracker in accelerator.trackers:
