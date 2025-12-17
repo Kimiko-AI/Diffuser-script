@@ -211,7 +211,7 @@ def main():
                 pixel_values=images, 
                 prompts=prompts,
                 device=accelerator.device, 
-                paraphrased_prompts=full_prompts, # Pass full prompts as paraphrases
+               # paraphrased_prompts=full_prompts, # Pass full prompts as paraphrases
                 weight_dtype=weight_dtype
             )
 
