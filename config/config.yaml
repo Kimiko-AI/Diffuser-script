@@ -1,6 +1,6 @@
 # Training Configuration
 
-output_dir: "zimage-wds-training-2"
+output_dir: "zimage-wds-training-3"
 seed: 42
 report_to: "wandb"
 validation_prompt:
@@ -11,17 +11,20 @@ validation_prompt:
   - "mean_luminance: 0.58 std_luminance: 0.26 low_freq_energy: 11.46 high_freq_energy: 4.16 edge_density: 0.06 | general, 2girls, beach, black_hair, black_skirt, blouse, blue_neckerchief, blue_sailor_collar, blurry, blurry_background, collarbone, hand_on_another's_shoulder, leaning_on_person, lens_flare, long_hair, medium_hair, multiple_girls, neckerchief, ocean, outdoors, pleated_skirt, purple_eyes, reflection, reflective_water, sailor_collar, school_uniform, serafuku, shirt, short_sleeves, skirt, standing, white_shirt"
   - "mean_luminance: 0.53 std_luminance: 0.22 low_freq_energy: 12.33 high_freq_energy: 5.07 edge_density: 0.12 | general, 1girl, animal_ears, artist_name, bare_legs, barefoot, blush, breasts, english_text, green_eyes, grey_background, long_sleeves, looking_at_viewer, multicolored_hair, nose, open_mouth, short_hair, simple_background, solo, tentacle_hair, toes"
   - "mean_luminance: 0.29 std_luminance: 0.25 low_freq_energy: 11.64 high_freq_energy: 4.28 edge_density: 0.07 | general, 1girl, aqua_gemstone, blue_background, blue_gemstone, brown_eyes, claw_ring, colored_eyelashes, dripping, ear_piercing, earrings, fingernails, gem, gold, gold_earrings, gold_ring, gradient_background, green_gemstone, hands_on_own_face, jewelry, liquid, looking_up, multiple_earrings, nose_piercing, nose_ring, ornate_ring, parted_lips, piercing, pink_gemstone, purple_gemstone, red_gemstone, ribbon, ring, sharp_fingernails, signature, solo, surreal, upper_body, yellow_nails"
-  - "mean_luminance: 0.91 std_luminance: 0.23 low_freq_energy: 12.17 high_freq_energy: 7.29 edge_density: 0.17 | general, chen, chen_(cat), kaenbyou_rin, kaenbyou_rin_(cat), kazami_yuuka, !, 1girl, biting, cat, comic, dreaming, flower, greyscale, hat, monochrome, multiple_tails, sleeping, sunflower, tail, two_tails"
+  - "mean_luminance: 0.85 std_luminance: 0.22 low_freq_energy: 14.99 high_freq_energy: 7.93 edge_density: 0.03 | general, , 1girl animal_ears closed_mouth eyelashes flower frilled_sleeves frills hair_flower hair_ornament headdress long_hair long_sleeves looking_at_viewer makeup mole mole_under_eye picture_frame pink_eyes pink_flower pink_hair pink_petals rabbit_ears rouge_(makeup) smile solo upper_body watermark white_background white_headdress"
+  - "mean_luminance: 0.52 std_luminance: 0.24 low_freq_energy: 13.38 high_freq_energy: 4.43 edge_density: 0.01 | general, fuiba_fuyu, 1girl :o against_glass aquarium black_ribbon blue_eyes blue_hair blue_sailor_collar blue_skirt breasts fish hair_ornament hairclip hand_on_glass neck_ribbon open_mouth plaid_clothes plaid_sailor_collar plaid_skirt pleated_skirt ribbon sailor_collar school_uniform serafuku shirt short_hair short_sleeves skirt small_breasts solo white_shirt"
+  - "mean_luminance: 0.86 std_luminance: 0.25 low_freq_energy: 14.98 high_freq_energy: 7.38 edge_density: 0.04 | general, nahida_(genshin_impact), 1girl alternate_costume black_bow black_bowtie black_shoes blush bow bowtie closed_eyes closed_mouth dress enmaided flower frilled_hairband frills full_body gradient_hair green_hair hairband long_hair maid maid_headdress multicolored_hair pointy_ears ringlets shoes side_ponytail simple_background solo thighhighs white_background white_dress white_flower white_hair white_hairband white_thighhighs"
+  - "mean_luminance: 0.75 std_luminance: 0.27 low_freq_energy: 12.61 high_freq_energy: 5.52 edge_density: 0.05 | general, matsukai_mao matsukai_mao_(2nd_costume), 1girl animal_ears apron black_dress blush cat_ears cat_girl cat_tail dark-skinned_female dark_skin dress fang grey_hair looking_at_viewer maid maid_apron official_alternate_costume one_eye_closed purple_eyes solo tail virtual_youtuber white_apron"
 
-validation_steps: 500
+validation_steps: 200
 
 # Optimization
-learning_rate: 3.0e-4
+learning_rate: 0.0002
 afm_lambda: 0
 consistency_lambda: 0
 max_grad_norm: 1.0
 lr_scheduler_type: "cosine" # Options: "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
-lr_warmup_steps: 500
+lr_warmup_steps: 100
 mixed_precision: "bf16"
 gradient_accumulation_steps: 1
 gradient_checkpointing: true

@@ -161,13 +161,10 @@ def main():
             )
         else:
             accelerator.print(f"Resuming model weights from checkpoint {path}")
-            # accelerator.load_state(os.path.join(args.output_dir, path))
-            # global_step = int(path.split("-")[1])
-            
-            # Load only transformer weights
             load_path = os.path.join(args.output_dir, path)
             unwrapped_model = accelerator.unwrap_model(model_wrapper)
             
+            # 1. Load Model Weights
             safetensors_file = os.path.join(load_path, "diffusion_pytorch_model.safetensors")
             bin_file = os.path.join(load_path, "diffusion_pytorch_model.bin")
             
@@ -184,6 +181,21 @@ def main():
             else:
                 accelerator.print(f"No weights found at {load_path}")
 
+            # 2. Load Training State (Optimizer, Scheduler, Step)
+            state_file = os.path.join(load_path, "training_state.pt")
+            if os.path.exists(state_file):
+                accelerator.print(f"Loading training state from {state_file}")
+                # Map location to cpu to avoid potential OOM or device mismatch during load
+                training_state = torch.load(state_file, map_location="cpu")
+                global_step = training_state.get("global_step", 0)
+                
+                if "scheduler" in training_state:
+                    lr_scheduler.load_state_dict(training_state["scheduler"])
+                
+                accelerator.print(f"Resumed training state at global step {global_step}")
+            else:
+                accelerator.print("No training state file found. Resuming with fresh optimizer/scheduler.")
+
             # Ensure EMA model is on the correct device after loading state
             if getattr(args, "use_ema", False) and ema_model is not None:
                 ema_model.to(accelerator.device)
@@ -193,6 +205,18 @@ def main():
 
     # Training Loop
     data_iter = iter(dataloader)
+    
+    # Fast-forward dataloader
+    if global_step > 0:
+        accelerator.print(f"Skipping {global_step} batches to resume dataset position...")
+        # Only main process logs progress, but all processes must consume the iterator to stay in sync
+        # if using distributed sampler or wds with same split
+        for _ in tqdm(range(global_step), desc="Skipping batches", disable=not accelerator.is_local_main_process):
+            try:
+                next(data_iter)
+            except StopIteration:
+                data_iter = iter(dataloader)
+                next(data_iter)
 
     while global_step < args.max_train_steps:
         try:
@@ -242,6 +266,13 @@ def main():
                     # Access unwrapped transformer for saving model card info if needed
                     unwrapped_transformer = accelerator.unwrap_model(model_wrapper).transformer
                     unwrapped_transformer.save_pretrained(save_path)
+                    
+                    # Save training state (Step, Optimizer, Scheduler)
+                    # We save this manually because we aren't using accelerator.save_state() anymore
+                    torch.save({
+                        "global_step": global_step,
+                        "scheduler": lr_scheduler.state_dict()
+                    }, os.path.join(save_path, "training_state.pt"))
                     
                     save_model_card(
                         repo_id=f"lumina2-step-{global_step}",
