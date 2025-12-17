@@ -1,12 +1,9 @@
 import webdataset as wds
 import torch
-import torch.distributed as dist
-import os
 import torchvision.transforms as transforms
 from PIL import Image
 import numpy as np
 from functools import partial
-import logging
 
 
 def generate_buckets(base_width, base_height, step_size=32):
@@ -41,66 +38,47 @@ def resize_to_bucket(image, bucket_idx, bucket_sizes):
     return image.resize((target_w, target_h), Image.BICUBIC)
 
 
-def image_scalars(pil_image, edge_thresh=0.1, low_freq_ratio=0.1, high_freq_ratio=0.4):
-    """
-    Compute scalar conditioning features from a PIL image.
+def image_scalars(pil_image):
+    try:
+        img = pil_image.convert("RGB")
+        img_arr = np.asarray(img).astype(np.float32) / 255.0
 
-    Returns:
-        dict with keys:
-        - mean_luminance
-        - std_luminance
-        - low_freq_energy
-        - high_freq_energy
-        - edge_density
-    """
+        # --- A. Luminance & Contrast ---
+        # Rec. 709 Luminance
+        L = (0.2126 * img_arr[..., 0] + 0.7152 * img_arr[..., 1] + 0.0722 * img_arr[..., 2])
+        
+        # 1. Mean Luminance (Brightness)
+        mean_lum = float(L.mean())
+        
+        # 2. Contrast (Percentile-based)
+        p2, p98 = np.percentile(L, (2.5, 97.5))
+        contrast = float(p98 - p2)
 
-    # --- Convert to RGB and float ---
-    img = pil_image.convert("RGB")
-    img = np.asarray(img).astype(np.float32) / 255.0
+        # --- B. Entropy (Complexity) ---
+        hist, _ = np.histogram(L, bins=256, range=(0, 1), density=True)
+        prob = hist / (hist.sum() + 1e-8)
+        prob = prob[prob > 0]
+        entropy = float(-np.sum(prob * np.log2(prob)))
+        
+        # --- C. Color Metrics ---
+        # 3. Colorfulness (Vibrancy/Variety)
+        rg = img_arr[..., 0] - img_arr[..., 1]
+        yb = 0.5 * (img_arr[..., 0] + img_arr[..., 1]) - img_arr[..., 2]
+        std_root = np.sqrt(np.std(rg)**2 + np.std(yb)**2)
+        mean_root = np.sqrt(np.mean(rg)**2 + np.mean(yb)**2)
+        colorfulness = float(std_root + 0.3 * mean_root)
 
-    # --- Luminance (Rec. 709) ---
-    L = (
-            0.2126 * img[..., 0] +
-            0.7152 * img[..., 1] +
-            0.0722 * img[..., 2]
-    )
 
-    mean_lum = float(L.mean())
-    std_lum = float(L.std())
+        result_scalars = {
+            "mean_luminance": mean_lum,
+            "contrast": contrast,
+            "entropy": entropy,
+            "colorfulness": colorfulness,
+        }
 
-    # --- Frequency energy ---
-    H, W = L.shape
-    fft = np.fft.fftshift(np.fft.fft2(L))
-    power = np.log1p(np.abs(fft) ** 2)
-
-    # radial frequency grid
-    y, x = np.ogrid[:H, :W]
-    cy, cx = H // 2, W // 2
-    r = np.sqrt((y - cy) ** 2 + (x - cx) ** 2)
-    r_norm = r / r.max()
-
-    low_mask = r_norm <= low_freq_ratio
-    high_mask = r_norm >= high_freq_ratio
-
-    low_freq_energy = float(power[low_mask].mean())
-    high_freq_energy = float(power[high_mask].mean())
-
-    # --- Edge density ---
-    # simple finite differences
-    gx = np.diff(L, axis=1, append=L[:, -1:])
-    gy = np.diff(L, axis=0, append=L[-1:, :])
-    grad_mag = np.sqrt(gx ** 2 + gy ** 2)
-
-    edge_density = float((grad_mag > edge_thresh).mean())
-
-    return {
-        "mean_luminance": mean_lum,
-        "std_luminance": std_lum,
-        "low_freq_energy": low_freq_energy,
-        "high_freq_energy": high_freq_energy,
-        "edge_density": edge_density,
-    }
-
+        return result_scalars
+    except Exception as e:
+        return {} # Return empty dict to avoid None-related issues later
 
 # --- 1. Preprocessing Function ---
 def transform_sample(sample):
@@ -285,7 +263,6 @@ def bucket_batcher(data_stream, batch_size=1, bucket_sizes=None, bucket_ratios=N
                 buckets[b_idx] = []
 
         except Exception as e:
-            logger.warning(f"Skipping sample due to error: {e}")
             continue
 
 
