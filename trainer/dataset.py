@@ -38,6 +38,66 @@ def resize_to_bucket(image, bucket_idx, bucket_sizes):
     target_w, target_h = bucket_sizes[bucket_idx]
     return image.resize((target_w, target_h), Image.BICUBIC)
 
+def image_scalars(pil_image, edge_thresh=0.1, low_freq_ratio=0.1, high_freq_ratio=0.4):
+    """
+    Compute scalar conditioning features from a PIL image.
+
+    Returns:
+        dict with keys:
+        - mean_luminance
+        - std_luminance
+        - low_freq_energy
+        - high_freq_energy
+        - edge_density
+    """
+
+    # --- Convert to RGB and float ---
+    img = pil_image.convert("RGB")
+    img = np.asarray(img).astype(np.float32) / 255.0
+
+    # --- Luminance (Rec. 709) ---
+    L = (
+        0.2126 * img[..., 0] +
+        0.7152 * img[..., 1] +
+        0.0722 * img[..., 2]
+    )
+
+    mean_lum = float(L.mean())
+    std_lum = float(L.std())
+
+    # --- Frequency energy ---
+    H, W = L.shape
+    fft = np.fft.fftshift(np.fft.fft2(L))
+    power = np.log1p(np.abs(fft) ** 2)
+
+    # radial frequency grid
+    y, x = np.ogrid[:H, :W]
+    cy, cx = H // 2, W // 2
+    r = np.sqrt((y - cy)**2 + (x - cx)**2)
+    r_norm = r / r.max()
+
+    low_mask = r_norm <= low_freq_ratio
+    high_mask = r_norm >= high_freq_ratio
+
+    low_freq_energy = float(power[low_mask].mean())
+    high_freq_energy = float(power[high_mask].mean())
+
+    # --- Edge density ---
+    # simple finite differences
+    gx = np.diff(L, axis=1, append=L[:, -1:])
+    gy = np.diff(L, axis=0, append=L[-1:, :])
+    grad_mag = np.sqrt(gx**2 + gy**2)
+
+    edge_density = float((grad_mag > edge_thresh).mean())
+
+    return {
+        "mean_luminance": mean_lum,
+        "std_luminance": std_lum,
+        "low_freq_energy": low_freq_energy,
+        "high_freq_energy": high_freq_energy,
+        "edge_density": edge_density,
+    }
+
 # --- 1. Preprocessing Function ---
 def transform_sample(sample):
     # Adapting to common WDS formats (jpg/png/webp)
@@ -52,6 +112,19 @@ def transform_sample(sample):
     
     if image is None:
         raise ValueError("No image found in sample")
+
+    scalar_prefix = "" # Initialize to empty string
+    # 80% chance to add scalars (20% chance to not prepend anything)
+    if np.random.random() > 0.20: 
+        # Compute scalars
+        scalars = image_scalars(image)
+        scalar_parts = []
+        for k, v in scalars.items():
+            # 50% chance to include each scalar
+            if np.random.random() < 0.5:
+                scalar_parts.append(f"{k}: {v:.2f}")
+        
+        scalar_prefix = " ".join(scalar_parts)
 
     # Handle prompts
     # Assuming 'json' or 'txt' or 'caption'
@@ -158,6 +231,10 @@ def transform_sample(sample):
     elif "caption" in sample:
         prompt = sample["caption"]
         full_prompt = prompt
+
+    if scalar_prefix:
+        prompt = f"{scalar_prefix} {prompt}"
+        full_prompt = f"{scalar_prefix} {full_prompt}"
 
     return {
         "image": image,
