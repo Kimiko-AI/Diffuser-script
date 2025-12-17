@@ -45,28 +45,27 @@ def log_validation(accelerator, model_wrapper, args, global_step, ema_model=None
 
     all_images = []
     
-    # Generate for each prompt
-    for prompt_idx, prompt in enumerate(validation_prompts):
-        # Run inference using the wrapper's generate method
-        # Infer num_validation_images from number of prompts (1 per prompt)
-        images = unwrapped_wrapper.generate(
-            prompt=prompt,
-            num_inference_steps=20,
-            guidance_scale=4.0,
-            num_images=1,
-            seed=args.seed,
-            device=accelerator.device
-        )
-        
-        # Collect for consolidated logging
-        for img in images:
-            all_images.append((prompt, img))
+    # Generate all images in a single batch
+    # This assumes generate() can handle a list of prompts and returns a list of images (one per prompt)
+    images = unwrapped_wrapper.generate(
+        prompt=validation_prompts,
+        num_inference_steps=50,
+        guidance_scale=4.0,
+        num_images=1, # One image per prompt in the list
+        seed=args.seed,
+        device=accelerator.device
+    )
 
+    # Collect for consolidated logging
+    for i, img in enumerate(images):
+        prompt = validation_prompts[i]
+        all_images.append((prompt, img))
+        
         # Tensorboard logging per prompt group
         for tracker in accelerator.trackers:
             if tracker.name == "tensorboard":
-                np_images = np.stack([np.asarray(img) for img in images])
-                tracker.writer.add_images(f"validation/prompt_{prompt_idx}", np_images, global_step, dataformats="NHWC")
+                np_images = np.asarray(img)[None, ...] # Add batch dim
+                tracker.writer.add_images(f"validation/prompt_{i}", np_images, global_step, dataformats="NHWC")
 
     if ema_model is not None:
         ema_model.restore(unwrapped_wrapper.transformer.parameters())
