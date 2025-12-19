@@ -4,14 +4,10 @@ import yaml
 import os
 import shutil
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.tensorboard import SummaryWriter
 import gc
 import logging
-import math
 from tqdm.auto import tqdm
 from diffusers.optimization import get_scheduler
 from trainer.data import get_dataloader
@@ -21,7 +17,6 @@ from trainer.models.zimage_wrapper import ZImageWrapper
 from trainer.models.sana_wrapper import SanaWrapper
 from contextlib import nullcontext
 
-# WandB check
 try:
     import wandb
     _has_wandb = True
@@ -83,9 +78,6 @@ def main():
             wandb.init(project="zimage-training", config=vars(args), dir=args.output_dir)
         
         writer = None
-        if args.report_to == "tensorboard":
-             logging_dir = os.path.join(args.output_dir, "logs")
-             writer = SummaryWriter(log_dir=logging_dir)
     else:
         logger.setLevel(logging.ERROR)
         writer = None
@@ -166,9 +158,6 @@ def main():
         num_warmup_steps=args.lr_warmup_steps,
         num_training_steps=args.max_train_steps
     )
-
-    # Scaler for FP16
-    scaler = torch.cuda.amp.GradScaler(enabled=(args.mixed_precision == "fp16"))
 
     # === RESUME LOGIC ===
     global_step = 0
@@ -310,16 +299,14 @@ def main():
                      loss = loss / args.gradient_accumulation_steps
                  
                  # Backward
-                 scaler.scale(loss).backward()
+                 loss.backward()
                  accum_loss += loss.item()
 
         # Step
         if args.max_grad_norm > 0:
-             scaler.unscale_(optimizer)
              torch.nn.utils.clip_grad_norm_(model_wrapper.parameters(), args.max_grad_norm)
         
-        scaler.step(optimizer)
-        scaler.update()
+        optimizer.step()
         optimizer.zero_grad()
         
         global_step += 1
@@ -396,7 +383,6 @@ def main():
         if global_step % args.validation_steps == 0:
             if rank == 0:
                 with torch.no_grad():
-                    # We pass the wrapper. log_validation handles unwrapping now.
                     log_validation(
                         model_wrapper=model_wrapper,
                         args=args,

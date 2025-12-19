@@ -37,49 +37,6 @@ def resize_to_bucket(image, bucket_idx, bucket_sizes):
     target_w, target_h = bucket_sizes[bucket_idx]
     return image.resize((target_w, target_h), Image.BICUBIC)
 
-
-def image_scalars(pil_image):
-    try:
-        img = pil_image.convert("RGB")
-        img_arr = np.asarray(img).astype(np.float32) / 255.0
-
-        # --- A. Luminance & Contrast ---
-        # Rec. 709 Luminance
-        L = (0.2126 * img_arr[..., 0] + 0.7152 * img_arr[..., 1] + 0.0722 * img_arr[..., 2])
-        
-        # 1. Mean Luminance (Brightness)
-        mean_lum = float(L.mean())
-        
-        # 2. Contrast (Percentile-based)
-        p2, p98 = np.percentile(L, (2.5, 97.5))
-        contrast = float(p98 - p2)
-
-        # --- B. Entropy (Complexity) ---
-        hist, _ = np.histogram(L, bins=256, range=(0, 1), density=True)
-        prob = hist / (hist.sum() + 1e-8)
-        prob = prob[prob > 0]
-        entropy = float(-np.sum(prob * np.log2(prob)))
-        
-        # --- C. Color Metrics ---
-        # 3. Colorfulness (Vibrancy/Variety)
-        rg = img_arr[..., 0] - img_arr[..., 1]
-        yb = 0.5 * (img_arr[..., 0] + img_arr[..., 1]) - img_arr[..., 2]
-        std_root = np.sqrt(np.std(rg)**2 + np.std(yb)**2)
-        mean_root = np.sqrt(np.mean(rg)**2 + np.mean(yb)**2)
-        colorfulness = float(std_root + 0.3 * mean_root)
-
-
-        result_scalars = {
-            "mean_luminance": mean_lum,
-            "contrast": contrast,
-            "entropy": entropy,
-            "colorfulness": colorfulness,
-        }
-
-        return result_scalars
-    except Exception as e:
-        return {} # Return empty dict to avoid None-related issues later
-
 # --- 1. Preprocessing Function ---
 def transform_sample(sample):
     # Adapting to common WDS formats (jpg/png/webp)
@@ -94,20 +51,6 @@ def transform_sample(sample):
 
     if image is None:
         raise ValueError("No image found in sample")
-
-    scalar_prefix = ""  # Initialize to empty string
-    # 80% chance to add scalars (20% chance to not prepend anything)
-    if np.random.random() > 0.20:
-        # Compute scalars
-        scalars = image_scalars(image)
-        scalar_parts = []
-        for k, v in scalars.items():
-            # 50% chance to include each scalar
-            if np.random.random() < 0.5:
-                scalar_parts.append(f"{k}: {v:.2f}")
-
-        scalar_prefix = " ".join(scalar_parts)
-
     # Handle prompts
     # Assuming 'json' or 'txt' or 'caption'
     prompt = ""
@@ -214,11 +157,6 @@ def transform_sample(sample):
     elif "caption" in sample:
         prompt = sample["caption"]
         full_prompt = prompt
-
-    if scalar_prefix:
-        prompt = f"{prompt}"
-        full_prompt = f"{full_prompt}"
-
     return {
         "image": image,
         "prompts": prompt,

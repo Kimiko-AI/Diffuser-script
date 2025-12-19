@@ -4,7 +4,7 @@ from diffusers import (
     FlowMatchEulerDiscreteScheduler,
     SanaTransformer2DModel,
 )
-from transformers import AutoTokenizer, Gemma2Model
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 def load_sana_components(args):
     """
@@ -25,9 +25,7 @@ def load_sana_components(args):
         revision=args.revision,
     )
 
-    # Load Text Encoder (Gemma2)
-    # Sana uses Gemma2Model
-    text_encoder = Gemma2Model.from_pretrained(
+    text_encoder = AutoModelForCausalLM.from_pretrained(
         args.pretrained_model_name_or_path, 
         subfolder="text_encoder", 
         revision=args.revision, 
