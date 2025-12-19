@@ -216,8 +216,8 @@ def transform_sample(sample):
         full_prompt = prompt
 
     if scalar_prefix:
-        prompt = f"{scalar_prefix} {prompt}"
-        full_prompt = f"{scalar_prefix} {full_prompt}"
+        prompt = f"{prompt}"
+        full_prompt = f"{full_prompt}"
 
     return {
         "image": image,

@@ -29,15 +29,18 @@ Trained on {base_model}.
     populate_model_card(model_card, tags=["text-to-image", "lumina2"]).save(os.path.join(repo_folder, "README.md"))
 
 
-def log_validation(accelerator, model_wrapper, args, global_step):
+def log_validation(model_wrapper, args, global_step, device, writer=None):
     validation_prompts = args.validation_prompt
     if isinstance(validation_prompts, str):
         validation_prompts = [validation_prompts]
 
     logger.info(f"Running validation... Prompts: {validation_prompts}")
 
-    # Unwrap the wrapper if it's wrapped by accelerator (DDP)
-    unwrapped_wrapper = accelerator.unwrap_model(model_wrapper)
+    # Unwrap the wrapper if it's wrapped by DDP
+    if hasattr(model_wrapper, "module"):
+        unwrapped_wrapper = model_wrapper.module
+    else:
+        unwrapped_wrapper = model_wrapper
 
     all_images = []
     
@@ -49,7 +52,7 @@ def log_validation(accelerator, model_wrapper, args, global_step):
         guidance_scale=4.0,
         num_images=1, # One image per prompt in the list
         seed=args.seed,
-        device=accelerator.device
+        device=device
     )
 
     # Collect for consolidated logging
@@ -58,22 +61,21 @@ def log_validation(accelerator, model_wrapper, args, global_step):
         all_images.append((prompt, img))
         
         # Tensorboard logging per prompt group
-        for tracker in accelerator.trackers:
-            if tracker.name == "tensorboard":
-                np_images = np.asarray(img)[None, ...] # Add batch dim
-                tracker.writer.add_images(f"validation/prompt_{i}", np_images, global_step, dataformats="NHWC")
+        if writer is not None:
+            np_images = np.asarray(img)[None, ...] # Add batch dim
+            writer.add_images(f"validation/prompt_{i}", np_images, global_step, dataformats="NHWC")
 
     # Consolidated WandB logging
-    for tracker in accelerator.trackers:
-        if tracker.name == "wandb":
-            tracker.log(
-                {
-                    "validation": [
-                        wandb.Image(image, caption=f"{i}: {prompt}") 
-                        for i, (prompt, image) in enumerate(all_images)
-                    ]
-                }
-            )
+    if is_wandb_available() and wandb.run is not None:
+        wandb.log(
+            {
+                "validation": [
+                    wandb.Image(image, caption=f"{i}: {prompt}") 
+                    for i, (prompt, image) in enumerate(all_images)
+                ]
+            },
+            step=global_step
+        )
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()

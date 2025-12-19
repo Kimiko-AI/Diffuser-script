@@ -4,24 +4,23 @@ output_dir: "zimage-wds-training-3"
 seed: 333
 report_to: "wandb"
 validation_prompt:
-  - "mean_luminance: 0.64 contrast: 0.90 entropy: 6.82 colorfulness: 0.33 | general, shana, 1girl >:) black_thighhighs bow closed_mouth grey_bow grey_sailor_collar grey_skirt hair_between_eyes holding holding_sword holding_weapon katana long_hair looking_at_viewer puffy_short_sleeves puffy_sleeves red_eyes red_hair sailor_collar school_uniform serafuku shirt short_sleeves skirt smile solo standing sword thighhighs v-shaped_eyebrows very_long_hair weapon white_background white_shirt"
-  - "mean_luminance: 0.41 contrast: 0.90 entropy: 7.69 colorfulness: 0.16 | general, sakuraba_ema, 1girl belt beret black_background black_belt black_dress black_hat bug butterfly butterfly_on_hand cherry_blossoms cowboy_shot dress empty_eyes flower hair_flower hair_ornament hand_up hat long_sleeves looking_at_viewer multicolored_hair neck_ribbon o-ring o-ring_thigh_strap parted_lips pink_eyes pink_hair red_butterfly ribbon shirt short_hair shorts skeletal_wings solo standing thigh_strap white_flower white_hair white_ribbon white_shirt white_shorts wings witch_(manosaba) x_hair_ornament"
-  - "mean_luminance: 0.75 contrast: 0.83 entropy: 3.47 colorfulness: 0.11 | general, nikaido_hiro sakuraba_ema, 2girls animal_collar animal_ears armband arrow_(symbol) beret black_dress black_hair black_hat black_shirt black_skirt blush cat_ears cat_girl cat_tail closed_eyes collar dog_ears dog_girl dog_tail dress fang flower gloves gradient_hair hair_flower hair_ornament hat holding holding_hands holding_leash interlocked_fingers kemonomimi_mode leash long_hair long_sleeves multicolored_hair multiple_girls necktie o-ring o-ring_thigh_strap open_mouth pink_hair pleated_skirt red_armband red_collar red_eyes red_flower red_necktie shirt short_hair simple_background skirt smile speech_bubble standing tail thigh_strap white_background white_flower white_gloves white_hair x_hair_ornament yuri"
-  - "mean_luminance: 0.43 contrast: 0.83 entropy: 7.76 colorfulness: 0.13 | general, zhezhi_(wuthering_waves), 1girl ^_^ asymmetrical_bangs black_cat black_hair cat chinese_clothes closed_eyes earrings flower glasses gradient_hair hanfu holding holding_umbrella jewelry long_hair lotus_leaf lotus_print multicolored_hair musaceae official_alternate_costume oil-paper_umbrella outdoors parted_bangs pink_hair plant potted_plant purple_flower round_eyewear solo tree twintails umbrella very_long_hair white_flower wide_sleeves"
-  - "mean_luminance: 0.93 contrast: 0.35 entropy: 5.06 colorfulness: 0.03 | general, serizawa_asahi, 1girl blue_eyes close-up closed_mouth earrings grey_hair jewelry portrait short_hair simple_background solo white_background"
-  - "mean_luminance: 0.18 contrast: 0.58 entropy: 5.96 colorfulness: 0.37 | general, kasane_teto, 1girl black_hair black_nails bright_pupils close-up double-parted_bangs drill_hair facing_viewer fingernails hair_between_eyes multicolored_hair nail_polish pink_hair red_eyes red_trim shaded_face teeth tongue tongue_out twin_drills two-tone_hair white_pupils wide_sleeves"
-  - "mean_luminance: 0.53 contrast: 1.00 entropy: 4.73 colorfulness: 0.21 | general, iwakura_lain ura_(iyowa), 1girl black_hair closed_mouth collar cosplay elevator greyscale hair_ornament looking_at_viewer maid maid_headdress monochrome parted_bangs reaching reaching_towards_viewer short_hair smile solo spot_color ura_(iyowa)_(cosplay) x_hair_ornament"
-  - "mean_luminance: 0.80 contrast: 0.58 entropy: 6.92 colorfulness: 0.23 | general, 1girl animal_ears blue_bow blue_bowtie blue_eyes bow bowtie card closed_mouth eyelashes hair_between_eyes hair_bow hair_ornament long_hair long_sleeves looking_at_viewer playing_card portrait rabbit_ears sidelocks single_hair_intake solo square upper_body watch watermark"
-  - "mean_luminance: 0.56 contrast: 0.86 entropy: 7.76 colorfulness: 0.25 | general, 1girl blue_eyes blue_nails blunt_bangs bonnet carousel crinoline day dress frilled_bonnet frills holding holding_pocket_watch juliet_sleeves lens_flare light_rays lolita_fashion long_hair long_sleeves looking_at_viewer outdoors pale_skin pantyhose pocket_watch puffy_sleeves sitting solo sunbeam sunlight watch wavy_hair white_dress white_hair white_pantyhose"
-  - "mean_luminance: 0.74 contrast: 0.66 entropy: 7.22 colorfulness: 0.22 | general, jogasaki_noah, 1girl :d >_< beret black_jacket black_ribbon blunt_bangs bow chibi chibi_inset closed_mouth collared_shirt hand_up hat heterochromia jacket long_hair long_sleeves looking_at_viewer multi-tied_hair multicolored_hair neck_ribbon paintbrush polka_dot polka_dot_bow red_eyes ribbon shirt smile solo streaked_hair upper_body white_hair white_shirt xd yellow_eyes"
-  - "mean_luminance: 0.17 contrast: 0.44 entropy: 6.44 colorfulness: 0.07 | general, hatsune_miku, 1girl alternate_costume aqua_eyes aqua_hair aqua_nails bare_legs bare_shoulders bed black_bow black_dress black_sleeves bow collarbone curtains dark detached_sleeves double-parted_bangs dress fingernails hair_between_eyes hair_bow indoors long_hair looking_at_viewer nail_polish number_tattoo on_bed shoulder_tattoo sitting smile tattoo twintails very_long_hair"
-  - "mean_luminance: 0.19 contrast: 0.45 entropy: 6.72 colorfulness: 0.17 | general, 1girl bed bedroom blanket blonde_hair closed_eyes closed_mouth collared_shirt cowboy_shot dark desk dress expressionless eyelashes heart heart-shaped_pillow indoors lamp light_rays light_smile long_sleeves medium_dress medium_hair nightstand paper pen pillow pinafore_dress pink_dress pleated_dress poster_(object) puffy_long_sleeves puffy_sleeves rubbing_head shirt sleeveless sleeveless_dress solo standing sunset white_shirt window"
+  - "general, shana, 1girl >:) black_thighhighs bow closed_mouth grey_bow grey_sailor_collar grey_skirt hair_between_eyes holding holding_sword holding_weapon katana long_hair looking_at_viewer puffy_short_sleeves puffy_sleeves red_eyes red_hair sailor_collar school_uniform serafuku shirt short_sleeves skirt smile solo standing sword thighhighs v-shaped_eyebrows very_long_hair weapon white_background white_shirt"
+  - "general, sakuraba_ema, 1girl belt beret black_background black_belt black_dress black_hat bug butterfly butterfly_on_hand cherry_blossoms cowboy_shot dress empty_eyes flower hair_flower hair_ornament hand_up hat long_sleeves looking_at_viewer multicolored_hair neck_ribbon o-ring o-ring_thigh_strap parted_lips pink_eyes pink_hair red_butterfly ribbon shirt short_hair shorts skeletal_wings solo standing thigh_strap white_flower white_hair white_ribbon white_shirt white_shorts wings witch_(manosaba) x_hair_ornament"
+  - "general, nikaido_hiro sakuraba_ema, 2girls animal_collar animal_ears armband arrow_(symbol) beret black_dress black_hair black_hat black_shirt black_skirt blush cat_ears cat_girl cat_tail closed_eyes collar dog_ears dog_girl dog_tail dress fang flower gloves gradient_hair hair_flower hair_ornament hat holding holding_hands holding_leash interlocked_fingers kemonomimi_mode leash long_hair long_sleeves multicolored_hair multiple_girls necktie o-ring o-ring_thigh_strap open_mouth pink_hair pleated_skirt red_armband red_collar red_eyes red_flower red_necktie shirt short_hair simple_background skirt smile speech_bubble standing tail thigh_strap white_background white_flower white_gloves white_hair x_hair_ornament yuri"
+  - "general, zhezhi_(wuthering_waves), 1girl ^_^ asymmetrical_bangs black_cat black_hair cat chinese_clothes closed_eyes earrings flower glasses gradient_hair hanfu holding holding_umbrella jewelry long_hair lotus_leaf lotus_print multicolored_hair musaceae official_alternate_costume oil-paper_umbrella outdoors parted_bangs pink_hair plant potted_plant purple_flower round_eyewear solo tree twintails umbrella very_long_hair white_flower wide_sleeves"
+  - "general, serizawa_asahi, 1girl blue_eyes close-up closed_mouth earrings grey_hair jewelry portrait short_hair simple_background solo white_background"
+  - "general, kasane_teto, 1girl black_hair black_nails bright_pupils close-up double-parted_bangs drill_hair facing_viewer fingernails hair_between_eyes multicolored_hair nail_polish pink_hair red_eyes red_trim shaded_face teeth tongue tongue_out twin_drills two-tone_hair white_pupils wide_sleeves"
+  - "general, iwakura_lain ura_(iyowa), 1girl black_hair closed_mouth collar cosplay elevator greyscale hair_ornament looking_at_viewer maid maid_headdress monochrome parted_bangs reaching reaching_towards_viewer short_hair smile solo spot_color ura_(iyowa)_(cosplay) x_hair_ornament"
+  - "general, 1girl animal_ears blue_bow blue_bowtie blue_eyes bow bowtie card closed_mouth eyelashes hair_between_eyes hair_bow hair_ornament long_hair long_sleeves looking_at_viewer playing_card portrait rabbit_ears sidelocks single_hair_intake solo square upper_body watch watermark"
+  - "general, 1girl blue_eyes blue_nails blunt_bangs bonnet carousel crinoline day dress frilled_bonnet frills holding holding_pocket_watch juliet_sleeves lens_flare light_rays lolita_fashion long_hair long_sleeves looking_at_viewer outdoors pale_skin pantyhose pocket_watch puffy_sleeves sitting solo sunbeam sunlight watch wavy_hair white_dress white_hair white_pantyhose"
+  - "general, jogasaki_noah, 1girl :d >_< beret black_jacket black_ribbon blunt_bangs bow chibi chibi_inset closed_mouth collared_shirt hand_up hat heterochromia jacket long_hair long_sleeves looking_at_viewer multi-tied_hair multicolored_hair neck_ribbon paintbrush polka_dot polka_dot_bow red_eyes ribbon shirt smile solo streaked_hair upper_body white_hair white_shirt xd yellow_eyes"
+  - "general, hatsune_miku, 1girl alternate_costume aqua_eyes aqua_hair aqua_nails bare_legs bare_shoulders bed black_bow black_dress black_sleeves bow collarbone curtains dark detached_sleeves double-parted_bangs dress fingernails hair_between_eyes hair_bow indoors long_hair looking_at_viewer nail_polish number_tattoo on_bed shoulder_tattoo sitting smile tattoo twintails very_long_hair"
+  - "general, 1girl bed bedroom blanket blonde_hair closed_eyes closed_mouth collared_shirt cowboy_shot dark desk dress expressionless eyelashes heart heart-shaped_pillow indoors lamp light_rays light_smile long_sleeves medium_dress medium_hair nightstand paper pen pillow pinafore_dress pink_dress pleated_dress poster_(object) puffy_long_sleeves puffy_sleeves rubbing_head shirt sleeveless sleeveless_dress solo standing sunset white_shirt window"
   -
 validation_steps: 600
 
 # Optimization
 learning_rate: 0.0002
-weight_decay: 0.01
 afm_lambda: 0
 consistency_lambda: 0
 max_grad_norm: 1.0
@@ -44,12 +43,6 @@ bucket_step_size: 32
 train_batch_size: 128
 dataloader_num_workers: 32
 max_train_steps: 100000
-shuffle_buffer_size: 1000
-# Data Augmentation
-aug_scalar_prob: 0.2
-aug_scalar_keep_prob: 0.5
-aug_drop_char_tags_prob: 0.4
-max_sequence_length: 64
 
 # Timestep Sampling
 timestep_sampling:
@@ -64,8 +57,6 @@ text_encoder_path: "Tongyi-MAI/Z-Image-Turbo"
 vae_path: "Tongyi-MAI/Z-Image-Turbo"
 transformer_class_path: "diffusers.ZImageTransformer2DModel"
 caption_dropout_prob: 0.1
-validation_guidance_scale: 4.0
-validation_inference_steps: 20
 model_config: false
 #model_config:
 #    all_f_patch_size:
