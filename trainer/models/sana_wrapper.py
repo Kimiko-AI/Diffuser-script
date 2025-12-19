@@ -89,7 +89,7 @@ class SanaWrapper(nn.Module):
         # --- 2. Encode Images (VAE) ---
         with torch.no_grad():
             # AutoencoderDC usually returns 'latents' in its output
-            latents = self.vae.encode(pixel_values.to(dtype=weight_dtype)).latents
+            latents = self.vae.encode(pixel_values.to(dtype=weight_dtype)).latent
             latents = latents * self.vae.config.scaling_factor
             latents = latents.to(dtype=weight_dtype)
 
