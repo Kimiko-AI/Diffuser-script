@@ -22,22 +22,17 @@ def load_sana_components(args):
     tokenizer = AutoTokenizer.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="tokenizer",
-        revision=args.revision,
     )
 
     text_encoder = AutoModelForCausalLM.from_pretrained(
         args.pretrained_model_name_or_path, 
         subfolder="text_encoder", 
-        revision=args.revision, 
-        variant=args.variant
     )
 
     # Load VAE (AutoencoderDC)
     vae = AutoencoderDC.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="vae",
-        revision=args.revision,
-        variant=args.variant,
     )
 
     # Load Transformer (SanaTransformer2DModel)
