@@ -62,8 +62,10 @@ class SanaWrapper(nn.Module):
             max_sequence_length = getattr(self.args, "max_sequence_length", 300)
             complex_human_instruction = getattr(self.args, "complex_human_instruction", None)
             
+            # encode_prompt returns: prompt_embeds, prompt_attention_mask, negative_prompt_embeds, negative_prompt_attention_mask
             prompt_embeds, prompt_attention_mask, _, _ = self.text_encoding_pipeline.encode_prompt(
-                prompts_in,
+                prompt=prompts_in,
+                do_classifier_free_guidance=False, # Training typically only needs positive
                 max_sequence_length=max_sequence_length,
                 complex_human_instruction=complex_human_instruction,
                 device=device
@@ -78,7 +80,8 @@ class SanaWrapper(nn.Module):
             prompt_attention_mask_pos = None
             if paraphrased_prompts is not None and consistency_lambda > 0:
                  prompt_embeds_pos, prompt_attention_mask_pos, _, _ = self.text_encoding_pipeline.encode_prompt(
-                    paraphrased_prompts,
+                    prompt=paraphrased_prompts,
+                    do_classifier_free_guidance=False,
                     max_sequence_length=max_sequence_length,
                     complex_human_instruction=complex_human_instruction,
                     device=device
