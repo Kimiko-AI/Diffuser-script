@@ -45,8 +45,6 @@ def load_sana_components(args):
         transformer = SanaTransformer2DModel.from_pretrained(
             args.pretrained_model_name_or_path, 
             subfolder="transformer", 
-            revision=args.revision, 
-            variant=args.variant
         )
 
     return noise_scheduler, tokenizer, text_encoder, vae, transformer
