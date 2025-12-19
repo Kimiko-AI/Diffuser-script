@@ -33,6 +33,9 @@ def log_validation(model_wrapper, args, global_step, device, writer=None):
     validation_prompts = args.validation_prompt
     if isinstance(validation_prompts, str):
         validation_prompts = [validation_prompts]
+    
+    # Filter out None or empty prompts
+    validation_prompts = [p for p in validation_prompts if p and isinstance(p, str)]
 
     logger.info(f"Running validation... Prompts: {validation_prompts}")
 

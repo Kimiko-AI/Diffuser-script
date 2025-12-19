@@ -259,6 +259,9 @@ class SanaWrapper(nn.Module):
             tokenizer=self.tokenizer,
             scheduler=self.noise_scheduler,
         )
+        pipeline._get_gemma_prompt_embeds = types.MethodType(
+            _get_gemma_prompt_embeds_patched, pipeline
+        )
         pipeline.to(device)
         pipeline.set_progress_bar_config(disable=True)
 

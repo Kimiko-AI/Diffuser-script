@@ -16,7 +16,6 @@ validation_prompt:
   - "general, jogasaki_noah, 1girl :d >_< beret black_jacket black_ribbon blunt_bangs bow chibi chibi_inset closed_mouth collared_shirt hand_up hat heterochromia jacket long_hair long_sleeves looking_at_viewer multi-tied_hair multicolored_hair neck_ribbon paintbrush polka_dot polka_dot_bow red_eyes ribbon shirt smile solo streaked_hair upper_body white_hair white_shirt xd yellow_eyes"
   - "general, hatsune_miku, 1girl alternate_costume aqua_eyes aqua_hair aqua_nails bare_legs bare_shoulders bed black_bow black_dress black_sleeves bow collarbone curtains dark detached_sleeves double-parted_bangs dress fingernails hair_between_eyes hair_bow indoors long_hair looking_at_viewer nail_polish number_tattoo on_bed shoulder_tattoo sitting smile tattoo twintails very_long_hair"
   - "general, 1girl bed bedroom blanket blonde_hair closed_eyes closed_mouth collared_shirt cowboy_shot dark desk dress expressionless eyelashes heart heart-shaped_pillow indoors lamp light_rays light_smile long_sleeves medium_dress medium_hair nightstand paper pen pillow pinafore_dress pink_dress pleated_dress poster_(object) puffy_long_sleeves puffy_sleeves rubbing_head shirt sleeveless sleeveless_dress solo standing sunset white_shirt window"
-  -
 validation_steps: 600
 
 # Optimization
