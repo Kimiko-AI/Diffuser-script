@@ -2,9 +2,60 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import random
+import types
 from typing import List, Optional, Union, Dict, Any
 from diffusers import SanaPipeline
 from diffusers.training_utils import compute_density_for_timestep_sampling, compute_loss_weighting_for_sd3
+
+# Patched function for SanaPipeline
+def _get_gemma_prompt_embeds_patched(
+    self,
+    prompt: Union[str, List[str]],
+    device: torch.device,
+    dtype: torch.dtype,
+    clean_caption: bool = False,
+    max_sequence_length: int = 300,
+    complex_human_instruction: Optional[List[str]] = None,
+):
+    prompt = [prompt] if isinstance(prompt, str) else prompt
+
+    if getattr(self, "tokenizer", None) is not None:
+        self.tokenizer.padding_side = "right"
+
+    prompt = self._text_preprocessing(prompt, clean_caption=clean_caption)
+
+    # prepare complex human instruction
+    if not complex_human_instruction:
+        max_length_all = max_sequence_length
+    else:
+        chi_prompt = "\n".join(complex_human_instruction)
+        prompt = [chi_prompt + p for p in prompt]
+        num_chi_prompt_tokens = len(self.tokenizer.encode(chi_prompt))
+        max_length_all = num_chi_prompt_tokens + max_sequence_length - 2
+
+    text_inputs = self.tokenizer(
+        prompt,
+        padding="max_length",
+        max_length=max_length_all,
+        truncation=True,
+        add_special_tokens=True,
+        return_tensors="pt",
+    )
+    text_input_ids = text_inputs.input_ids
+    prompt_attention_mask = text_inputs.attention_mask
+    prompt_attention_mask = prompt_attention_mask.to(device)
+
+    # User-requested Patch: Use named arguments and specific extraction
+    prompt_embeds = self.text_encoder(
+        input_ids=text_input_ids.to(device),
+        attention_mask=prompt_attention_mask,
+        output_hidden_states=True,
+    ).hidden_states[-2]
+    
+    prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
+
+    return prompt_embeds, prompt_attention_mask
+
 
 class SanaWrapper(nn.Module):
     def __init__(self, transformer, vae, text_encoder, tokenizer, noise_scheduler, args=None):
@@ -32,6 +83,11 @@ class SanaWrapper(nn.Module):
             tokenizer=self.tokenizer,
             transformer=self.transformer, # Pipeline requires transformer for init, though we won't use it for gen here
             scheduler=self.noise_scheduler
+        )
+        
+        # Apply Patch
+        self.text_encoding_pipeline._get_gemma_prompt_embeds = types.MethodType(
+            _get_gemma_prompt_embeds_patched, self.text_encoding_pipeline
         )
 
     @property
