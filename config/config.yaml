@@ -16,7 +16,7 @@ validation_prompt:
   - "general, jogasaki_noah, 1girl :d >_< beret black_jacket black_ribbon blunt_bangs bow chibi chibi_inset closed_mouth collared_shirt hand_up hat heterochromia jacket long_hair long_sleeves looking_at_viewer multi-tied_hair multicolored_hair neck_ribbon paintbrush polka_dot polka_dot_bow red_eyes ribbon shirt smile solo streaked_hair upper_body white_hair white_shirt xd yellow_eyes"
   - "general, hatsune_miku, 1girl alternate_costume aqua_eyes aqua_hair aqua_nails bare_legs bare_shoulders bed black_bow black_dress black_sleeves bow collarbone curtains dark detached_sleeves double-parted_bangs dress fingernails hair_between_eyes hair_bow indoors long_hair looking_at_viewer nail_polish number_tattoo on_bed shoulder_tattoo sitting smile tattoo twintails very_long_hair"
   - "general, 1girl bed bedroom blanket blonde_hair closed_eyes closed_mouth collared_shirt cowboy_shot dark desk dress expressionless eyelashes heart heart-shaped_pillow indoors lamp light_rays light_smile long_sleeves medium_dress medium_hair nightstand paper pen pillow pinafore_dress pink_dress pleated_dress poster_(object) puffy_long_sleeves puffy_sleeves rubbing_head shirt sleeveless sleeveless_dress solo standing sunset white_shirt window"
-validation_steps: 600
+validation_steps: 500
 
 # Optimization
 learning_rate: 0.0002
@@ -32,16 +32,16 @@ use_ema: true
 ema_decay: 0.9999
 ema_update_after_step: 0
 resume_from_checkpoint: "latest" # "latest" or path to checkpoint directory
-checkpointing_steps: 600
+checkpointing_steps: 1000
 checkpoints_total_limit: 3
 # Data (WebDataset)
 #data_url: "pipe:curl -s -L https://huggingface.co/datasets/DSULT-Alya/Renai-Circulation-bucketized-crossing-field/resolve/main/0000/bucket_00{{00..99}}_000000.tar -H 'Authorization:Bearer '"
-data_url: "anime/train/000{01..02}.tar"
+data_url: "/workspace/shinon/anime/train/000{01..37}.tar"
 resolution: 256 # Base resolution (int or [w, h])
 bucket_step_size: 32
-train_batch_size: 16
-dataloader_num_workers: 2
-max_train_steps: 100000
+train_batch_size: 64
+dataloader_num_workers: 8
+max_train_steps: 1000000
 
 # Timestep Sampling
 timestep_sampling:
@@ -49,12 +49,12 @@ timestep_sampling:
   logit_mean: 0.0
   logit_std: 1.0
   mode_scale: 1.29
-model_type: "sana"
+
 # Model Configuration (Pretrain from Scratch)
-pretrained_model_name_or_path: "Shio-Koube/SANA-Gemma3-270m"
-text_encoder_path: "unsloth/gemma-3-270m-it"
-vae_path: "Shio-Koube/SANA-Gemma3-270m"
-transformer_class_path: "diffusers.SanaTransformer2DModel"
+pretrained_model_name_or_path: "Tongyi-MAI/Z-Image-Turbo"
+text_encoder_path: "Tongyi-MAI/Z-Image-Turbo"
+vae_path: "Tongyi-MAI/Z-Image-Turbo"
+transformer_class_path: "diffusers.ZImageTransformer2DModel"
 caption_dropout_prob: 0.1
 model_config: false
 #model_config:
