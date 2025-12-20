@@ -11,7 +11,6 @@ if is_wandb_available():
 logger = logging.getLogger(__name__)
 
 
-
 def save_model_card(repo_id, base_model=None, repo_folder=None):
     # Simplified model card saving without validation images
     model_description = f"""
@@ -29,13 +28,10 @@ Trained on {base_model}.
     populate_model_card(model_card, tags=["text-to-image", "lumina2"]).save(os.path.join(repo_folder, "README.md"))
 
 
-def log_validation(model_wrapper, args, global_step, device, writer=None):
+def log_validation(model_wrapper, args, global_step, device):
     validation_prompts = args.validation_prompt
     if isinstance(validation_prompts, str):
         validation_prompts = [validation_prompts]
-    
-    # Filter out None or empty prompts
-    validation_prompts = [p for p in validation_prompts if p and isinstance(p, str)]
 
     logger.info(f"Running validation... Prompts: {validation_prompts}")
 
@@ -46,14 +42,14 @@ def log_validation(model_wrapper, args, global_step, device, writer=None):
         unwrapped_wrapper = model_wrapper
 
     all_images = []
-    
+
     # Generate all images in a single batch
     # This assumes generate() can handle a list of prompts and returns a list of images (one per prompt)
-    images = unwrapped_wrapper.generate(
+    images, validation_prompts = unwrapped_wrapper.generate(
         prompt=validation_prompts,
-        num_inference_steps=50,
+        num_inference_steps=20,
         guidance_scale=4.0,
-        num_images=1, # One image per prompt in the list
+        num_images=1,  # One image per prompt in the list
         seed=args.seed,
         device=device
     )
@@ -62,18 +58,13 @@ def log_validation(model_wrapper, args, global_step, device, writer=None):
     for i, img in enumerate(images):
         prompt = validation_prompts[i]
         all_images.append((prompt, img))
-        
-        # Tensorboard logging per prompt group
-        if writer is not None:
-            np_images = np.asarray(img)[None, ...] # Add batch dim
-            writer.add_images(f"validation/prompt_{i}", np_images, global_step, dataformats="NHWC")
 
     # Consolidated WandB logging
     if is_wandb_available() and wandb.run is not None:
         wandb.log(
             {
                 "validation": [
-                    wandb.Image(image, caption=f"{i}: {prompt}") 
+                    wandb.Image(image, caption=f"{i}: {prompt}")
                     for i, (prompt, image) in enumerate(all_images)
                 ]
             },

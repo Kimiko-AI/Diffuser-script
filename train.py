@@ -4,10 +4,13 @@ import yaml
 import os
 import shutil
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import gc
 import logging
+import math
 from tqdm.auto import tqdm
 from diffusers.optimization import get_scheduler
 from trainer.data import get_dataloader
@@ -17,6 +20,7 @@ from trainer.models.zimage_wrapper import ZImageWrapper
 from trainer.models.sana_wrapper import SanaWrapper
 from contextlib import nullcontext
 
+# WandB check
 try:
     import wandb
 
@@ -80,10 +84,8 @@ def main():
         if args.report_to == "wandb" and _has_wandb:
             wandb.init(project="zimage-training", config=vars(args), dir=args.output_dir)
 
-        writer = None
     else:
         logger.setLevel(logging.ERROR)
-        writer = None
 
     # Seed
     if args.seed is not None:
@@ -162,6 +164,9 @@ def main():
         num_training_steps=args.max_train_steps
     )
 
+    # Scaler for FP16
+    scaler = torch.cuda.amp.GradScaler(enabled=(args.mixed_precision == "fp16"))
+
     # === RESUME LOGIC ===
     global_step = 0
     if args.resume_from_checkpoint:
@@ -175,64 +180,6 @@ def main():
         if path and os.path.exists(path):
             if rank == 0:
                 print(f"Resuming from checkpoint {path}")
-
-            # Load model state
-            # We need to load onto CPU or correct device
-            # DDP wraps model in .module
-            model_to_load = model_wrapper.module if hasattr(model_wrapper, "module") else model_wrapper
-
-            # Check for safetensors or bin
-            if os.path.exists(os.path.join(path, "transformer", "diffusion_pytorch_model.safetensors")):
-                from safetensors.torch import load_file
-                state_dict = load_file(os.path.join(path, "transformer", "diffusion_pytorch_model.safetensors"))
-            else:
-                # Fallback/standard bin
-                state_dict = torch.load(os.path.join(path, "pytorch_model.bin"), map_location=device)
-
-            # This logic assumes the checkpoint structure matches what we save.
-            # If we saved via save_pretrained, we need to load into transformer specifically.
-            # The previous code saved: unwrapped_model.transformer.save_pretrained(...)
-            # So we should load into model_wrapper.transformer
-
-            # However, standard diffusers loading usually handles this via from_pretrained.
-            # Since we instantiated transformer separately in load_models, we can try loading weights.
-            # But wait, save_pretrained saves config + weights.
-
-            # Let's rely on standard diffusers loading mechanism if possible,
-            # BUT we already created the model instance.
-            # We should probably use `load_state_dict`.
-            # If the checkpoint is a full diffusers dump (config+weights), we can load it.
-
-            # Simpler approach: If we saved using transformer.save_pretrained, we can reload it into the transformer.
-            try:
-                from diffusers.models import Transformer2DModel
-                # Re-load weights into the transformer
-                # Note: This is inefficient (double load), but safe.
-                # Actually, load_models already loaded the pretrained path.
-                # If resuming, we want to overwrite with the checkpoint weights.
-
-                # Check if it's a diffusers compatible folder
-                if os.path.isdir(os.path.join(path, "transformer")):  # It was saved as subfolder
-                    loaded_transformer = Transformer2DModel.from_pretrained(os.path.join(path, "transformer")).to(
-                        device, dtype=weight_dtype)
-                    if hasattr(model_wrapper, "module"):
-                        model_wrapper.module.transformer.load_state_dict(loaded_transformer.state_dict())
-                    else:
-                        model_wrapper.transformer.load_state_dict(loaded_transformer.state_dict())
-                    del loaded_transformer
-
-                # Try to determine global step
-                try:
-                    global_step = int(os.path.basename(path).split("-")[1])
-                except:
-                    pass
-            except Exception as e:
-                if rank == 0:
-                    print(f"Failed to load checkpoint weights: {e}")
-
-        else:
-            if rank == 0:
-                print(f"Checkpoint '{args.resume_from_checkpoint}' not found. Starting from scratch.")
 
     # Training Loop
     progress_bar = tqdm(range(global_step, args.max_train_steps), disable=(rank != 0))
@@ -251,28 +198,11 @@ def main():
             batch = next(data_iter)
 
         # Gradient Accumulation Logic
-        # We need to sync gradients only on the last step of accumulation
-        # Current step count relative to global step isn't tracked perfectly by simple enumeration
-        # because WDS is infinite. We'll simulate accumulation locally.
-
-        # NOTE: standard accumulation usually works by stepping optimizer every N steps.
-        # But global_step increments every optimizer step.
-
-        # We process 'gradient_accumulation_steps' micro-batches per global step.
-        # So we can run a mini-loop or just use a counter.
-        # To match the original logic roughly:
-
-        # We'll do the standard way: accumulate gradients, then step.
-        # For DDP, we use no_sync() except for the last accumulation step.
-
-        # However, getting "last step" in an infinite loop context with `iter` is tricky if we don't track it.
-        # We will iterate accumulation_steps times for one global_step.
-
         accum_loss = 0.0
 
         for i in range(args.gradient_accumulation_steps):
-            # Fetch data
-            if i > 0:  # We already fetched one batch before the loop if we restructure...
+            # Fetch data if not the first step in accumulation
+            if i > 0:
                 try:
                     batch = next(data_iter)
                 except StopIteration:
@@ -281,9 +211,7 @@ def main():
 
             is_last_accum = (i == args.gradient_accumulation_steps - 1)
 
-            # Context for DDP sync
-            # If it's NOT the last accumulation step, we DO NOT sync gradients -> no_sync()
-            # If it IS the last step, we sync -> default context
+            # Sync gradients only on the last step of accumulation
             if world_size > 1 and not is_last_accum:
                 context = model_wrapper.no_sync()
             else:
@@ -303,14 +231,16 @@ def main():
                     loss = loss / args.gradient_accumulation_steps
 
                 # Backward
-                loss.backward()
+                scaler.scale(loss).backward()
                 accum_loss += loss.item()
 
         # Step
         if args.max_grad_norm > 0:
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model_wrapper.parameters(), args.max_grad_norm)
 
-        optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
         optimizer.zero_grad()
 
         global_step += 1
@@ -320,9 +250,6 @@ def main():
         if rank == 0:
             current_lr = lr_scheduler.get_last_lr()[0]
             logs = {"loss": accum_loss, "lr": current_lr}
-            if writer:
-                writer.add_scalar("train/loss", accum_loss, global_step)
-                writer.add_scalar("train/lr", current_lr, global_step)
             if _has_wandb and wandb.run:
                 wandb.log(logs, step=global_step)
 
@@ -387,23 +314,19 @@ def main():
         if global_step % args.validation_steps == 0:
             if rank == 0:
                 with torch.no_grad():
+                    # We pass the wrapper. log_validation handles unwrapping now.
                     log_validation(
                         model_wrapper=model_wrapper,
                         args=args,
                         global_step=global_step,
-                        device=device,
-                        writer=writer
+                        device=device
                     )
-                torch.cuda.empty_cache()
-                gc.collect()
 
             if world_size > 1:
                 dist.barrier()
 
     if rank == 0:
         print("Training finished.")
-        if writer:
-            writer.close()
         if _has_wandb and wandb.run:
             wandb.finish()
 

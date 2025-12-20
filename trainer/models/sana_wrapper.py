@@ -230,9 +230,6 @@ class SanaWrapper(nn.Module):
 
         return loss
 
-    def get_sigmas(self, timesteps, n_dim=4, dtype=torch.float32):
-        # Deprecated/Unused with new forward logic
-        pass
 
     @torch.no_grad()
     def generate(
@@ -263,7 +260,7 @@ class SanaWrapper(nn.Module):
             _get_gemma_prompt_embeds_patched, pipeline
         )
         pipeline.to(device)
-        pipeline.set_progress_bar_config(disable=True)
+        pipeline.set_progress_bar_config(disable=False)
 
         generator = torch.Generator(device=device).manual_seed(seed) if seed else None
 
@@ -282,4 +279,4 @@ class SanaWrapper(nn.Module):
         if was_training:
             self.transformer.train()
 
-        return images
+        return images, prompt

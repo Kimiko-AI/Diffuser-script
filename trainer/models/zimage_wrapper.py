@@ -8,7 +8,8 @@ from diffusers.training_utils import compute_density_for_timestep_sampling
 
 
 class ZImageWrapper(nn.Module):
-    def __init__(self, transformer, vae, text_encoder, tokenizer, noise_scheduler, timestep_sampling_config=None, caption_dropout_prob=0.0, afm_lambda=0.0, consistency_lambda=1.0):
+    def __init__(self, transformer, vae, text_encoder, tokenizer, noise_scheduler, timestep_sampling_config=None,
+                 caption_dropout_prob=0.0, afm_lambda=0.0, consistency_lambda=1.0):
         super().__init__()
         self.transformer = transformer
         # Use lists to prevent nn.Module from registering them as submodules
@@ -30,7 +31,7 @@ class ZImageWrapper(nn.Module):
 
         # Ensure transformer is in train mode by default
         self.transformer.train().to(torch.bfloat16)
-        
+
         # Initialize Refiner
         # Latent channels usually 4 or 16. transformer output matches it.
         latent_channels = self.vae.config.latent_channels
@@ -55,23 +56,23 @@ class ZImageWrapper(nn.Module):
 
     def load_state_dict(self, state_dict, strict=True):
         # Filter out vae and text_encoder keys from the state_dict
-        # This ensures that resuming from checkpoints that included them (old behavior) 
+        # This ensures that resuming from checkpoints that included them (old behavior)
         # doesn't cause "Unexpected key(s)" errors.
         new_state_dict = {
             k: v for k, v in state_dict.items()
-            if not k.startswith("vae.") and not k.startswith("text_encoder.") and 
+            if not k.startswith("vae.") and not k.startswith("text_encoder.") and
                not k.startswith("_vae.") and not k.startswith("_text_encoder.")
         }
         return super().load_state_dict(new_state_dict, strict=strict)
 
     def forward(
-        self, 
-        pixel_values, 
-        prompts, 
-        device, 
-        paraphrased_prompts: Optional[List[str]] = None, 
-        weight_dtype=torch.float32,
-        consistency_lambda: float = None # Allow override
+            self,
+            pixel_values,
+            prompts,
+            device,
+            paraphrased_prompts: Optional[List[str]] = None,
+            weight_dtype=torch.float32,
+            consistency_lambda: float = None  # Allow override
     ):
         # Use instance default if not provided
         if consistency_lambda is None:
@@ -88,7 +89,7 @@ class ZImageWrapper(nn.Module):
             prompt_embeds, _ = self.text_encoding_pipeline.encode_prompt(
                 prompts_in, max_sequence_length=64, device=device, do_classifier_free_guidance=False
             )
-            
+
             # --- Encode Paraphrased Text (Positive Pair) ---
             prompt_embeds_pos = None
             if paraphrased_prompts is not None:
@@ -106,12 +107,12 @@ class ZImageWrapper(nn.Module):
         # --- 3. Prepare Flow Matching ---
         bsz = latents.shape[0]
         noise = torch.randn_like(latents)
-        
+
         u = compute_density_for_timestep_sampling(
             batch_size=bsz,
             **self.timestep_sampling_config
         ).to(device)
-        
+
         sigmas_view = u.view(bsz, 1, 1, 1)
         noisy_latents = (1.0 - sigmas_view) * noise + sigmas_view * latents
         noisy_latents_input = list(noisy_latents.unsqueeze(2).unbind(dim=0))
@@ -128,32 +129,26 @@ class ZImageWrapper(nn.Module):
         # --- 5. Calculate Standard Losses ---
         target = latents - noise
         loss_fm = F.mse_loss(model_pred.float(), target.float())
-        
+
         loss = loss_fm
 
         # --- 6. Positive Pair Consistency (The requested feature) ---
         # If we have paraphrases, force the model to predict similar flows for both prompts
         if prompt_embeds_pos is not None:
-             model_pred_pos = self.transformer(
-                noisy_latents_input, # Same noisy input
-                u.flatten(),         # Same timestep
-                prompt_embeds_pos,   # Different (paraphrased) text
+            model_pred_pos = self.transformer(
+                noisy_latents_input,  # Same noisy input
+                u.flatten(),  # Same timestep
+                prompt_embeds_pos,  # Different (paraphrased) text
                 return_dict=False
             )[0]
-             model_pred_pos = torch.stack(model_pred_pos, dim=0).squeeze(2)
-             
-             # Apply Refiner to Positive Pair too
-             # Refiner is not initialized in __init__, so this would crash.
-             # refiner_input_pos = torch.cat([model_pred_pos, noisy_latents], dim=1)
-             # refiner_delta_pos = self.refiner(refiner_input_pos)
-             # model_pred_pos = model_pred_pos + refiner_delta_pos
-             
-             # Minimize distance between Anchor Flow and Positive Flow
-             loss_consistency = F.mse_loss(
-                 model_pred.detach().float(),
-                 model_pred_pos.float()
-             )
-             loss = loss + (consistency_lambda * loss_consistency)
+            model_pred_pos = torch.stack(model_pred_pos, dim=0).squeeze(2)
+
+            # Minimize distance between Anchor Flow and Positive Flow
+            loss_consistency = F.mse_loss(
+                model_pred.detach().float(),
+                model_pred_pos.float()
+            )
+            loss = loss + (consistency_lambda * loss_consistency)
 
         # --- 7. Negative Pair Contrastive (AFM from Paper) ---
         # The paper emphasizes this part: steering AWAY from wrong conditions
@@ -161,7 +156,7 @@ class ZImageWrapper(nn.Module):
             neg_latents = torch.roll(latents, shifts=1, dims=0)
             neg_noise = torch.roll(noise, shifts=1, dims=0)
             neg_target = (neg_latents - neg_noise)
-            
+
             # Note: The paper maximizes distance to NEGATIVE flow [cite: 48, 128]
             # This is mathematically equivalent to minimizing the negative of the distance
             loss_contrastive = F.mse_loss(model_pred.detach().float(), neg_target.float())
@@ -186,7 +181,7 @@ class ZImageWrapper(nn.Module):
         # Ensure eval mode
         was_training = self.transformer.training
         self.transformer.eval()
-
+        prompt = random.sample(prompt, 4)
         pipeline = ZImagePipeline(
             transformer=self.transformer,
             vae=self.vae,
@@ -195,7 +190,7 @@ class ZImageWrapper(nn.Module):
             scheduler=self.noise_scheduler,
         )
         pipeline.to(device)
-        pipeline.set_progress_bar_config(disable=True)
+        pipeline.set_progress_bar_config(disable=False)
 
         generator = torch.Generator(device=device).manual_seed(seed) if seed else None
 
@@ -206,12 +201,12 @@ class ZImageWrapper(nn.Module):
         images = pipeline(
             prompt=prompt,
             generator=generator,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=guidance_scale
+            num_inference_steps=20,
+            guidance_scale=4
         ).images
 
         # Restore training state
         if was_training:
             self.transformer.train()
 
-        return images
+        return images, prompt

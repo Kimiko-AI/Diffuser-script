@@ -23,9 +23,6 @@ def load_zimage_components(args):
         # Default scheduler config if scratch
         noise_scheduler = FlowMatchEulerDiscreteScheduler() # Use default config
 
-    # Load Text Encoder & Tokenizer (Usually pretrained even if model is scratch)
-    # Unless we are pretraining text encoder too, which is rare for this context.
-    # We assume text encoder is always pretrained or provided via path.
     tokenizer = AutoTokenizer.from_pretrained(
         args.text_encoder_path or args.pretrained_model_name_or_path, subfolder = "tokenizer"
     )
