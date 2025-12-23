@@ -240,8 +240,8 @@ class SanaWrapper(nn.Module):
             num_images: int = 1,  # This acts as num_images_per_prompt
             seed: Optional[int] = None,
             device: Optional[torch.device] = None,
-            height: int = 1024,
-            width: int = 1024
+            height: int = 256,
+            width: int = 256
     ) -> List[Any]:
         if device is None:
             device = next(self.transformer.parameters()).device
