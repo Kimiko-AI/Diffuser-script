@@ -6,10 +6,16 @@ from diffusers import (
 )
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-def load_sana_components(args):
+def load_sana_components(args, device=None, weight_dtype=torch.float32):
     """
     Loads components specifically for Sana model.
     """
+    device_map = None
+    if device:
+        # device_map expects a string 'cuda:0' etc. or a dict.
+        # If device is a torch.device, str(device) works.
+        device_map = {"": str(device)}
+
     # Load scheduler
     if args.pretrained_model_name_or_path:
         noise_scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(
@@ -27,12 +33,18 @@ def load_sana_components(args):
     text_encoder = AutoModelForCausalLM.from_pretrained(
         args.pretrained_model_name_or_path, 
         subfolder="text_encoder", 
+        device_map=device_map,
+        torch_dtype=weight_dtype,
+        low_cpu_mem_usage=True if device_map else False
     )
 
     # Load VAE (AutoencoderDC)
     vae = AutoencoderDC.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="vae",
+        device_map=device_map,
+        torch_dtype=torch.float32, # Usually kept in fp32
+        low_cpu_mem_usage=True if device_map else False
     )
 
     # Load Transformer (SanaTransformer2DModel)
@@ -45,6 +57,9 @@ def load_sana_components(args):
         transformer = SanaTransformer2DModel.from_pretrained(
             args.pretrained_model_name_or_path, 
             subfolder="transformer", 
+            low_cpu_mem_usage=True,
+            device_map=device_map,
+            torch_dtype=weight_dtype
         )
 
     return noise_scheduler, tokenizer, text_encoder, vae, transformer

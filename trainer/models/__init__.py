@@ -3,16 +3,16 @@ from .sana_loader import load_sana_components
 from .zimage_wrapper import ZImageWrapper
 from .sana_wrapper import SanaWrapper
 
-def load_models(args):
+def load_models(args, device=None, weight_dtype=torch.float32):
     """
     Factory function to load model components based on model_type.
     """
     model_type = getattr(args, "model_type", "zimage")
     
     if model_type == "sana":
-        return load_sana_components(args)
+        return load_sana_components(args, device=device, weight_dtype=weight_dtype)
     elif model_type == "zimage":
-        return load_zimage_components(args)
+        return load_zimage_components(args, device=device, weight_dtype=weight_dtype)
     else:
         raise ValueError(f"Unknown model_type: {model_type}")
 

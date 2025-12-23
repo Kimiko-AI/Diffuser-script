@@ -92,11 +92,6 @@ def main():
         torch.manual_seed(args.seed + rank)
         torch.cuda.manual_seed(args.seed + rank)
 
-    # Load Models
-    # Models are loaded to CPU initially by default in most diffusers pipelines or custom loaders
-    # We need to move them to the correct device
-    noise_scheduler, tokenizer, text_encoder, vae, transformer = load_models(args)
-
     # Determine dtypes
     weight_dtype = torch.float32
     if args.mixed_precision == "fp16":
@@ -104,11 +99,9 @@ def main():
     elif args.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
 
-    # Move models to device
-    vae.to(device, dtype=torch.float32)  # VAE usually kept in fp32 to avoid NaN
-
-    text_encoder_dtype = torch.bfloat16 if args.mixed_precision == "bf16" else torch.float32
-    text_encoder.to(device, dtype=text_encoder_dtype)
+    # Load Models
+    # Models are loaded directly to device using device_map and low_cpu_mem_usage
+    noise_scheduler, tokenizer, text_encoder, vae, transformer = load_models(args, device=device, weight_dtype=weight_dtype)
 
     # Create Wrapper
     timestep_sampling_config = getattr(args, "timestep_sampling", None)
@@ -141,6 +134,7 @@ def main():
     if args.gradient_checkpointing:
         model_wrapper.transformer.enable_gradient_checkpointing()
 
+    # Move wrapper to device (components are already on device but wrapper itself needs move)
     model_wrapper = model_wrapper.to(device)
 
     # Wrap DDP
@@ -173,13 +167,28 @@ def main():
         path = args.resume_from_checkpoint
         if path == "latest":
             dirs = os.listdir(args.output_dir)
-            dirs = [d for d in dirs if d.startswith("checkpoint")]
+            dirs = [d for d in dirs if d.startswith("checkpoint-")]
             dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
             path = os.path.join(args.output_dir, dirs[-1]) if len(dirs) > 0 else None
 
         if path and os.path.exists(path):
             if rank == 0:
                 print(f"Resuming from checkpoint {path}")
+            
+            # Load transformer weights
+            transformer_path = os.path.join(path, "transformer")
+            if os.path.exists(transformer_path):
+                # Load state dict into transformer directly
+                # diffusers models have from_pretrained, but here we already have the object
+                # So we use load_state_dict or a similar mechanism if we want to avoid re-instantiation
+                # However, for simplicity and ensuring correct loading:
+                if hasattr(transformer, "load_state_dict"):
+                    from diffusers.models.modeling_utils import load_state_dict
+                    state_dict = load_state_dict(os.path.join(transformer_path, "diffusion_pytorch_model.safetensors"))
+                    transformer.load_state_dict(state_dict)
+                    del state_dict
+                
+            global_step = int(path.split("-")[-1])
 
     # Training Loop
     progress_bar = tqdm(range(global_step, args.max_train_steps), disable=(rank != 0))
