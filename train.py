@@ -255,6 +255,7 @@ def main():
 
         # Gradient Accumulation Logic
         accum_loss = 0.0
+        accum_logs = {}
 
         for i in range(args.gradient_accumulation_steps):
             # Fetch data if not the first step in accumulation
@@ -278,12 +279,24 @@ def main():
                 prompts = batch["prompts"]
 
                 with amp_context:
-                    loss = model_wrapper(
+                    model_output = model_wrapper(
                         pixel_values=images,
                         prompts=prompts,
                         device=device,
                         weight_dtype=weight_dtype
                     )
+                    
+                    if isinstance(model_output, dict):
+                        loss = model_output["loss"]
+                        # Accumulate other metrics
+                        for k, v in model_output.items():
+                            if k not in accum_logs:
+                                accum_logs[k] = 0.0
+                            accum_logs[k] += v.item() / args.gradient_accumulation_steps
+                    else:
+                        loss = model_output
+                        accum_logs["loss"] = accum_logs.get("loss", 0.0) + loss.item() / args.gradient_accumulation_steps
+
                     loss = loss / args.gradient_accumulation_steps
 
                 # Backward
@@ -305,7 +318,9 @@ def main():
         # Logs
         if rank == 0:
             current_lr = lr_scheduler.get_last_lr()[0]
-            logs = {"loss": accum_loss, "lr": current_lr}
+            logs = {"lr": current_lr}
+            logs.update(accum_logs) # Add all accumulated losses
+            
             if _has_wandb and wandb.run:
                 wandb.log(logs, step=global_step)
 

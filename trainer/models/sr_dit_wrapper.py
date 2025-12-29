@@ -125,7 +125,17 @@ class SRDiTWrapper(BaseWrapper):
         )
         
         denoising_loss, proj_loss, _, _, denoising_loss_cls, cfm_loss, cfm_loss_cls = loss_dict
-        return denoising_loss + denoising_loss_cls + proj_loss + cfm_loss + cfm_loss_cls
+        
+        loss = denoising_loss + denoising_loss_cls + proj_loss + cfm_loss + cfm_loss_cls
+        
+        return {
+            "loss": loss,
+            "loss_img": denoising_loss,
+            "loss_cls": denoising_loss_cls,
+            "loss_proj": proj_loss,
+            "loss_cfm_img": cfm_loss,
+            "loss_cfm_cls": cfm_loss_cls
+        }
 
     @torch.no_grad()
     def generate(self, prompt, num_inference_steps=20, guidance_scale=4.0, num_images=1, seed=None, device=None):

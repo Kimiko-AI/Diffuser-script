@@ -220,7 +220,11 @@ class SRDiT(nn.Module):
         self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
         nn.init.xavier_uniform_(self.x_embedder.proj.weight.data.view([self.x_embedder.proj.weight.data.shape[0], -1]))
         nn.init.normal_(self.y_embedder.embedding_table.weight, std=0.02)
-        [nn.init.constant_(b.adaLN_modulation[-1].weight, 0) or nn.init.constant_(b.adaLN_modulation[-1].bias, 0) for b in self.blocks]
+        
+        for b in self.blocks:
+            nn.init.constant_(b.adaLN_modulation[-1].weight, 0)
+            nn.init.constant_(b.adaLN_modulation[-1].bias, 0)
+            
         nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
 
     def unpatchify(self, x):
