@@ -70,13 +70,19 @@ class SRDiTPipeline(DiffusionPipeline):
         
         cls_latents = torch.randn((batch_size, cls_dim), generator=generator, device=device, dtype=prompt_embeds.dtype)
 
-        self.scheduler.set_timesteps(num_inference_steps, device=device)
-        for t in self.scheduler.timesteps:
-            t_batch = torch.full((batch_size,), t, device=device, dtype=torch.long)
+        # Manual Euler Sampling
+        timesteps = torch.linspace(1.0, 0.0, num_inference_steps + 1, device=device)
+        
+        for i in range(num_inference_steps):
+            t_curr = timesteps[i]
+            t_next = timesteps[i+1]
+            dt = t_next - t_curr
+            
+            t_batch = torch.full((batch_size,), t_curr, device=device, dtype=prompt_embeds.dtype)
             model_output, _, cls_output = self.transformer(latents, t_batch, prompt_embeds, cls_token=cls_latents)
 
-            latents = self.scheduler.step(model_output, t, latents).prev_sample
-            cls_latents = self.scheduler.step(cls_output, t, cls_latents).prev_sample
+            latents = latents + model_output * dt
+            cls_latents = cls_latents + cls_output * dt
 
         # Inverse VAE normalization
         if self.vae_means is not None and self.vae_stds is not None:

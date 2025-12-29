@@ -260,6 +260,22 @@ class SRDiT(nn.Module):
             **block_kwargs
     ):
         super().__init__()
+        self.config = {
+            "input_size": input_size,
+            "patch_size": patch_size,
+            "in_channels": in_channels,
+            "hidden_size": hidden_size,
+            "depth": depth,
+            "num_heads": num_heads,
+            "mlp_ratio": mlp_ratio,
+            "class_dropout_prob": class_dropout_prob,
+            "num_classes": num_classes,
+            "context_dim": context_dim,
+            "cls_token_dim": cls_token_dim,
+            "z_dims": z_dims,
+            "projector_dim": projector_dim,
+            **block_kwargs
+        }
         self.in_channels = in_channels
         self.patch_size = patch_size
         self.depth = depth
@@ -368,3 +384,23 @@ class SRDiT(nn.Module):
         x_out, cls_token_out = self.final_layer(x, cond, cls_token)
 
         return self.unpatchify(x_out, patch_grid_size[0], patch_grid_size[1]), zs, cls_token_out
+
+    def save_pretrained(self, save_directory):
+        import os
+        import json
+
+        os.makedirs(save_directory, exist_ok=True)
+
+        # Save config
+        config_path = os.path.join(save_directory, "config.json")
+        with open(config_path, "w") as f:
+            json.dump(self.config, f, indent=4)
+
+        # Save weights
+        try:
+            from safetensors.torch import save_file
+            save_path = os.path.join(save_directory, "diffusion_pytorch_model.safetensors")
+            save_file(self.state_dict(), save_path)
+        except ImportError:
+            save_path = os.path.join(save_directory, "diffusion_pytorch_model.bin")
+            torch.save(self.state_dict(), save_path)
