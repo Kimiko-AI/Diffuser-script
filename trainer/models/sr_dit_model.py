@@ -404,3 +404,38 @@ class SRDiT(nn.Module):
         except ImportError:
             save_path = os.path.join(save_directory, "diffusion_pytorch_model.bin")
             torch.save(self.state_dict(), save_path)
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, **kwargs):
+        import os
+        import json
+
+        config_file = os.path.join(pretrained_model_name_or_path, "config.json")
+        if not os.path.isfile(config_file):
+            raise ValueError(f"Config file not found in {pretrained_model_name_or_path}")
+
+        with open(config_file, "r") as f:
+            config = json.load(f)
+
+        # Update config with kwargs
+        config.update(kwargs)
+
+        model = cls(**config)
+
+        # Load weights
+        try:
+            from safetensors.torch import load_file
+            weights_path = os.path.join(pretrained_model_name_or_path, "diffusion_pytorch_model.safetensors")
+            if os.path.isfile(weights_path):
+                state_dict = load_file(weights_path)
+            else:
+                raise FileNotFoundError
+        except (ImportError, FileNotFoundError):
+            weights_path = os.path.join(pretrained_model_name_or_path, "diffusion_pytorch_model.bin")
+            if os.path.isfile(weights_path):
+                state_dict = torch.load(weights_path, map_location="cpu")
+            else:
+                raise FileNotFoundError(f"No weights found in {pretrained_model_name_or_path}")
+
+        model.load_state_dict(state_dict)
+        return model

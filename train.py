@@ -225,15 +225,27 @@ def main():
             # Load transformer weights
             transformer_path = os.path.join(path, "transformer")
             if os.path.exists(transformer_path):
-                # Load state dict into transformer directly
-                # diffusers models have from_pretrained, but here we already have the object
-                # So we use load_state_dict or a similar mechanism if we want to avoid re-instantiation
-                # However, for simplicity and ensuring correct loading:
                 if hasattr(transformer, "load_state_dict"):
-                    from diffusers.models.modeling_utils import load_state_dict
-                    state_dict = load_state_dict(os.path.join(transformer_path, "diffusion_pytorch_model.safetensors"))
-                    transformer.load_state_dict(state_dict)
-                    del state_dict
+                    st_path = os.path.join(transformer_path, "diffusion_pytorch_model.safetensors")
+                    bin_path = os.path.join(transformer_path, "diffusion_pytorch_model.bin")
+                    
+                    state_dict = None
+                    if os.path.exists(st_path):
+                        try:
+                            from safetensors.torch import load_file
+                            state_dict = load_file(st_path)
+                        except ImportError:
+                            from diffusers.models.modeling_utils import load_state_dict
+                            state_dict = load_state_dict(st_path)
+                    elif os.path.exists(bin_path):
+                        state_dict = torch.load(bin_path, map_location="cpu")
+                    
+                    if state_dict is not None:
+                        transformer.load_state_dict(state_dict)
+                        del state_dict
+                    else:
+                        if rank == 0:
+                            print(f"No model weights found in {transformer_path}, skipping weight load.")
                 
             global_step = int(path.split("-")[-1])
 
