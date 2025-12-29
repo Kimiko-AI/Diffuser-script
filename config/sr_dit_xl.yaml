@@ -23,6 +23,9 @@ model:
     num_heads: 16
     patch_size: 2
     mlp_ratio: 4.0
+    cls_token_dim: 1152
+    z_dims: [1152]
+    projector_dim: 1152
 
 # Training Configuration
 training:
@@ -54,6 +57,7 @@ training:
 data:
   data_url: "/workspace/shinon/anime/train/000{01..37}.tar"
   resolution: 256
+  fast_mode: true
   bucket_step_size: 32
   dataloader_num_workers: 2
   caption_dropout_prob: 0.1

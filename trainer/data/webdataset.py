@@ -247,7 +247,63 @@ def bucket_batcher(data_stream, batch_size=1, bucket_sizes=None, bucket_ratios=N
             continue
 
 
-# --- 3. The Pipeline Builder ---
+# --- 3. Fast Batcher (Center Crop) ---
+def fast_batcher(data_stream, batch_size=1, resolution=256):
+    to_tensor = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize([0.5], [0.5])
+    ])
+    
+    batch = []
+    
+    for sample in data_stream:
+        try:
+            image = sample["image"]
+            
+            # Resize shortest edge to resolution
+            w, h = image.size
+            if min(w, h) < resolution:
+                # If image is too small, we might skip or upscale. 
+                # Upscaling:
+                scale = resolution / min(w, h)
+                new_w, new_h = int(w * scale), int(h * scale)
+                image = image.resize((new_w, new_h), Image.BICUBIC)
+            elif min(w, h) > resolution:
+                # Downscale to resolution if needed (optional, but good for anti-aliasing before crop)
+                # But typically we just want to crop center. 
+                # If we want "fast", maybe we just crop directly if it covers 256.
+                # But standard practice is resize shortest to 256 then crop.
+                scale = resolution / min(w, h)
+                new_w, new_h = int(w * scale), int(h * scale)
+                image = image.resize((new_w, new_h), Image.BICUBIC)
+            
+            # Center Crop
+            w, h = image.size
+            left = (w - resolution) // 2
+            top = (h - resolution) // 2
+            image = image.crop((left, top, left + resolution, top + resolution))
+            
+            image_tensor = to_tensor(image)
+            
+            batch.append({
+                "pixels": image_tensor,
+                "prompts": sample["prompts"],
+                "full_prompts": sample["full_prompts"]
+            })
+
+            if len(batch) >= batch_size:
+                yield {
+                    "pixels": torch.stack([x["pixels"] for x in batch]),
+                    "prompts": [x["prompts"] for x in batch],
+                    "full_prompts": [x["full_prompts"] for x in batch]
+                }
+                batch = []
+
+        except Exception as e:
+            continue
+
+
+# --- 4. The Pipeline Builder ---
 def get_wds_loader(url_pattern, batch_size, num_workers=4, is_train=True, base_resolution=256, bucket_step_size=32):
     # Determine base width and height
     if isinstance(base_resolution, (list, tuple)):
@@ -275,6 +331,42 @@ def get_wds_loader(url_pattern, batch_size, num_workers=4, is_train=True, base_r
     # Pass the generated bucket config to the batcher
     dataset = dataset.compose(
         partial(bucket_batcher, batch_size=batch_size, bucket_sizes=bucket_sizes, bucket_ratios=bucket_ratios)
+    )
+
+    loader = wds.WebLoader(
+        dataset,
+        batch_size=None,
+        num_workers=num_workers,
+        pin_memory=True,
+        prefetch_factor=2
+    )
+
+    return loader
+
+
+def get_fast_wds_loader(url_pattern, batch_size, num_workers=4, is_train=True, resolution=256):
+    dataset = wds.WebDataset(
+        url_pattern,
+        resampled=True,
+        handler=wds.warn_and_continue,
+        nodesplitter=wds.split_by_node,
+        shardshuffle=True
+    )
+
+    if is_train:
+        dataset = dataset.shuffle(1000)
+
+    dataset = dataset.compose(wds.split_by_worker)
+    dataset = dataset.decode("pil", handler=wds.warn_and_continue)
+    dataset = dataset.map(transform_sample, handler=wds.warn_and_continue)
+
+    # Use fast batcher
+    # Handle list resolution if passed
+    if isinstance(resolution, (list, tuple)):
+        resolution = resolution[0]
+        
+    dataset = dataset.compose(
+        partial(fast_batcher, batch_size=batch_size, resolution=resolution)
     )
 
     loader = wds.WebLoader(

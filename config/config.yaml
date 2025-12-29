@@ -20,12 +20,15 @@ model:
   #   n_layers: 8
   
   # SR-DiT Specific Config (if model_type is sr_dit)
-  # config:
-  #   hidden_size: 768
-  #   depth: 12
-  #   num_heads: 12
+  # model_config:
+  #   hidden_size: 1152
+  #   depth: 28
+  #   num_heads: 16
   #   patch_size: 2
   #   mlp_ratio: 4.0
+  #   cls_token_dim: 1152
+  #   z_dims: [1152]
+  #   projector_dim: 1152
 
 # Training Configuration
 training:
@@ -80,6 +83,7 @@ data:
   #data_url: "pipe:curl -s -L https://huggingface.co/datasets/DSULT-Alya/Renai-Circulation-bucketized-crossing-field/resolve/main/0000/bucket_00{{00..99}}_000000.tar -H 'Authorization:Bearer '"
   data_url: "/workspace/shinon/anime/train/000{01..37}.tar"
   resolution: 256
+  fast_mode: false # Set to true for SR-DiT fast loading
   bucket_step_size: 32
   dataloader_num_workers: 8
   caption_dropout_prob: 0.1
