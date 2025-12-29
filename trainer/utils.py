@@ -47,8 +47,8 @@ def log_validation(model_wrapper, args, global_step, device):
     # This assumes generate() can handle a list of prompts and returns a list of images (one per prompt)
     images, validation_prompts = unwrapped_wrapper.generate(
         prompt=validation_prompts,
-        num_inference_steps=20,
-        guidance_scale=4.0,
+        num_inference_steps=getattr(args, "validation_num_inference_steps", 20),
+        guidance_scale=getattr(args, "validation_guidance_scale", 4.0),
         num_images=1,  # One image per prompt in the list
         seed=args.seed,
         device=device

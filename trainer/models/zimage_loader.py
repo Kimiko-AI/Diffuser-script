@@ -61,7 +61,7 @@ def load_zimage_components(args, device=None, weight_dtype=torch.float32):
             args.pretrained_model_name_or_path, subfolder="transformer", 
             low_cpu_mem_usage=True,
             device_map=device_map,
-            torch_dtype=weight_dtype
+            torch_dtype=torch.float32
            # revision=args.revision, variant=args.variant
         )
     else:

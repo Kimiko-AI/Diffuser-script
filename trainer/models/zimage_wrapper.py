@@ -30,7 +30,7 @@ class ZImageWrapper(nn.Module):
         self.text_encoder.requires_grad_(False)
 
         # Ensure transformer is in train mode by default
-        self.transformer.train().to(torch.bfloat16)
+        self.transformer.train()
 
         # Initialize Refiner
         # Latent channels usually 4 or 16. transformer output matches it.

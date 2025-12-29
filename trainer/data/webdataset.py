@@ -62,6 +62,33 @@ def transform_sample(sample):
         if isinstance(json_data, dict):
             parts = []
             full_parts = []
+            
+            # --- Pixiv Extraction ---
+            pixiv_tags_str = ""
+            pixiv_title_str = ""
+            
+            if "pixiv" in json_data:
+                p_data = json_data["pixiv"]
+                
+                # Extract Title
+                if "work" in p_data and "titl" in p_data["work"]:
+                    pixiv_title_str = str(p_data["work"]["titl"])
+                    
+                # Extract Tags (Eng > Romaji > Orig)
+                if "tags" in p_data and "tags" in p_data["tags"]:
+                    p_tags_list = p_data["tags"]["tags"]
+                    extracted_p_tags = []
+                    if isinstance(p_tags_list, list):
+                        for t_obj in p_tags_list:
+                            t_val = t_obj.get("eng")
+                            if not t_val:
+                                t_val = t_obj.get("romaji")
+                            if not t_val:
+                                t_val = t_obj.get("orig")
+                            
+                            if t_val:
+                                extracted_p_tags.append(str(t_val))
+                    pixiv_tags_str = " ".join(extracted_p_tags)
 
             # Check for new structure (Pixiv/Tagger format)
             if "tags" in json_data and isinstance(json_data["tags"], list):
@@ -148,6 +175,22 @@ def transform_sample(sample):
                 parts.extend(gen_parts)
 
             prompt = " ".join(parts)[:512]
+            
+            # --- Replacement Logic ---
+            # 20% chance to replace with Title
+            # 20% chance to replace with Pixiv Tags
+            # Independent events. If both occur, we combine them.
+            
+            replace_with_title = (pixiv_title_str != "") and (np.random.random() < 0.2)
+            replace_with_ptags = (pixiv_tags_str != "") and (np.random.random() < 0.2)
+            
+            if replace_with_title and replace_with_ptags:
+                prompt = f"{pixiv_title_str} {pixiv_tags_str}"[:512]
+            elif replace_with_title:
+                prompt = pixiv_title_str[:512]
+            elif replace_with_ptags:
+                prompt = pixiv_tags_str[:512]
+            
         else:
             prompt = str(json_data)
             full_prompt = prompt

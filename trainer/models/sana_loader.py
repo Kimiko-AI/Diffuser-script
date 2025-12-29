@@ -59,7 +59,7 @@ def load_sana_components(args, device=None, weight_dtype=torch.float32):
             subfolder="transformer", 
             low_cpu_mem_usage=True,
             device_map=device_map,
-            torch_dtype=weight_dtype
+            torch_dtype=torch.float32
         )
 
     return noise_scheduler, tokenizer, text_encoder, vae, transformer

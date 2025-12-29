@@ -32,6 +32,31 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def flatten_config(config, parent_key='', sep='_'):
+    items = []
+    for k, v in config.items():
+        # Special handling for lists like validation_prompt to keep them as is
+        if isinstance(v, dict) and not (k == "timestep_sampling"): # Keep timestep_sampling as dict if needed by wrapper
+             # But wait, original code accessed args.timestep_sampling as a dict? 
+             # Let's check usage. 
+             # usage: timestep_sampling_config = getattr(args, "timestep_sampling", None)
+             # So timestep_sampling should remain a dict in args.
+             # However, simple flattening would make it timestep_sampling_weighting_scheme etc.
+             # We should probably flatten but ALSO keep sub-dicts if they represent coherent config objects.
+             
+             # Let's just flatten everything recursively for now, but also check how to handle
+             # things that were top-level before. 
+             # Actually, the best approach for this refactor without breaking code is:
+             # 1. Load config
+             # 2. Add keys to parser.
+             # If we have sections, we can flatten them into the top level namespace
+             # e.g. training.learning_rate -> args.learning_rate
+             
+             items.extend(flatten_config(v, parent_key='', sep=sep).items())
+        else:
+            items.append((k, v))
+    return dict(items)
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default="config/config.yaml")
@@ -40,11 +65,33 @@ def parse_args():
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
 
+    # Flatten the config for argument parsing
+    # This allows sections in yaml (e.g. model: learning_rate) to be accessed as args.learning_rate
+    # which matches current code expectation.
+    flat_config = {}
+    
+    def flatten(d):
+        for k, v in d.items():
+            if isinstance(v, dict) and k != "timestep_sampling": # Exception for known dict args
+                 flatten(v)
+            else:
+                flat_config[k] = v
+    
+    flatten(config)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default=args.config)
-    for k, v in config.items():
+    
+    for k, v in flat_config.items():
         if isinstance(v, (int, float, str, bool)) or v is None:
             parser.add_argument(f"--{k}", type=type(v) if v is not None else str, default=v)
+        elif isinstance(v, list):
+             # Handle lists (like validation prompts)
+             # argparse doesn't handle lists well by default in this dynamic way without 'nargs'
+             # but since we set default=v, it works for internal usage.
+             # If passed via CLI, user might need to pass multiple times or we need specific handling.
+             # For now, we assume these are mostly set in config.
+             parser.add_argument(f"--{k}", default=v)
         else:
             parser.add_argument(f"--{k}", default=v)
 
@@ -107,29 +154,29 @@ def main():
     timestep_sampling_config = getattr(args, "timestep_sampling", None)
     model_type = getattr(args, "model_type", "zimage")
 
-    if model_type == "sana":
-        model_wrapper = SanaWrapper(
-            transformer=transformer,
-            vae=vae,
-            text_encoder=text_encoder,
-            tokenizer=tokenizer,
-            noise_scheduler=noise_scheduler,
-            args=args
-        )
-    elif model_type == "zimage":
-        model_wrapper = ZImageWrapper(
-            transformer=transformer,
-            vae=vae,
-            text_encoder=text_encoder,
-            tokenizer=tokenizer,
-            noise_scheduler=noise_scheduler,
-            timestep_sampling_config=timestep_sampling_config,
-            caption_dropout_prob=getattr(args, "caption_dropout_prob", 0.0),
-            afm_lambda=getattr(args, "afm_lambda", 0.0),
-            consistency_lambda=getattr(args, "consistency_lambda", 1.0)
-        )
-    else:
-        raise ValueError(f"Unknown model_type: {model_type}")
+    # Use the factory from trainer/models/__init__.py
+    from trainer.models import get_model_wrapper
+    
+    # Common kwargs
+    wrapper_kwargs = {
+        "transformer": transformer,
+        "vae": vae,
+        "text_encoder": text_encoder,
+        "tokenizer": tokenizer,
+        "noise_scheduler": noise_scheduler,
+        "args": args
+    }
+    
+    # Add model specific args if needed
+    if model_type == "zimage":
+        wrapper_kwargs.update({
+            "timestep_sampling_config": timestep_sampling_config,
+            "caption_dropout_prob": getattr(args, "caption_dropout_prob", 0.0),
+            "afm_lambda": getattr(args, "afm_lambda", 0.0),
+            "consistency_lambda": getattr(args, "consistency_lambda", 1.0)
+        })
+    
+    model_wrapper = get_model_wrapper(model_type, **wrapper_kwargs)
 
     if args.gradient_checkpointing:
         model_wrapper.transformer.enable_gradient_checkpointing()
