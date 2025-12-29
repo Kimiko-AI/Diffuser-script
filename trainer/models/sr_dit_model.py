@@ -255,7 +255,7 @@ class ConvMLP(nn.Module):
         self.fc1 = nn.Conv2d(in_features, hidden_features, 1)
         self.act = act_layer()
         
-        groups = hidden_features // 32 if hidden_features % 32 == 0 else 1
+        groups = 32
         self.conv = nn.Conv2d(hidden_features, hidden_features, 3, padding=1, groups=groups)
         self.fc2 = nn.Conv2d(hidden_features, in_features, 1)
         self.drop = nn.Dropout(drop)
