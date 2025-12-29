@@ -24,7 +24,9 @@ def load_common_components(args, device=None, weight_dtype=torch.float32):
              noise_scheduler = FlowMatchEulerDiscreteScheduler()
     else:
         noise_scheduler = FlowMatchEulerDiscreteScheduler()
-
+    noise_scheduler =  FlowMatchEulerDiscreteScheduler.from_pretrained(
+                args.pretrained_model_name_or_path, subfolder="scheduler",
+            )
     # Determine paths
     pretrained_path = args.pretrained_model_name_or_path
     

@@ -71,7 +71,7 @@ class TimestepEmbedder(nn.Module):
         ).to(t.device)
 
         args = t[:, None].float() * freqs[None]
-        t_freq = torch.cat([torch.cos(args), torch.sin(args)], dim=-1).to(t.dtype)
+        t_freq = torch.cat([torch.cos(args), torch.sin(args)], dim=-1).to(self.mlp[0].weight.dtype)
         return self.mlp(t_freq)
 
 
