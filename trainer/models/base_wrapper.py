@@ -48,7 +48,23 @@ class BaseWrapper(nn.Module):
                 return_tensors="pt",
             )
             text_input_ids = text_inputs.input_ids.to(device)
-            prompt_embeds = self.text_encoder(text_input_ids)[0]
+            attention_mask = text_inputs.attention_mask.to(device)
+
+            # Request hidden states to support CausalLM models (where [0] is logits)
+            # and standard models (where [0] or last_hidden_state is embeddings)
+            outputs = self.text_encoder(
+                text_input_ids, 
+                attention_mask=attention_mask, 
+                output_hidden_states=True
+            )
+            
+            if hasattr(outputs, "hidden_states"):
+                prompt_embeds = outputs.hidden_states[-1]
+            elif hasattr(outputs, "last_hidden_state"):
+                prompt_embeds = outputs.last_hidden_state
+            else:
+                prompt_embeds = outputs[0]
+
             prompt_embeds = prompt_embeds.to(dtype=weight_dtype)
             
             return prompt_embeds
