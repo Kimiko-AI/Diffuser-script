@@ -103,8 +103,8 @@ class SILoss:
                                                     cls_token=cls_input)
 
         #denoising_loss
-        denoising_loss = mean_flat((model_output - model_target) ** 2)
-        denoising_loss_cls = mean_flat((cls_output - cls_target) ** 2)
+        denoising_loss = mean_flat((model_output - model_target) ** 2).mean()
+        denoising_loss_cls = mean_flat((cls_output - cls_target) ** 2).mean()
 
         proj_loss = torch.tensor(0.0, device=images.device)
         if zs is not None and zs_out is not None:
