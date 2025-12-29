@@ -41,7 +41,24 @@ class SRDiTPipeline(DiffusionPipeline):
             truncation=True,
             return_tensors="pt",
         )
-        prompt_embeds = self.text_encoder(text_input_ids=text_inputs.input_ids.to(device))[0]
+        
+        # Correctly call text encoder with input_ids as positional or correct keyword
+        # and handle different output types
+        with torch.no_grad():
+            outputs = self.text_encoder(
+                text_inputs.input_ids.to(device),
+                attention_mask=text_inputs.attention_mask.to(device),
+                output_hidden_states=True
+            )
+            
+            if hasattr(outputs, "hidden_states"):
+                prompt_embeds = outputs.hidden_states[-1]
+            elif hasattr(outputs, "last_hidden_state"):
+                prompt_embeds = outputs.last_hidden_state
+            else:
+                prompt_embeds = outputs[0]
+            
+            prompt_embeds = prompt_embeds.to(dtype=self.transformer.x_embedder.weight.dtype)
 
         latents = torch.randn(
             (batch_size, self.transformer.in_channels, height // 8, width // 8),
