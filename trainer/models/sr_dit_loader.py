@@ -46,14 +46,14 @@ def load_sr_dit_components(args, device=None, weight_dtype=torch.float32):
         input_size=input_size,
         patch_size=config.get("patch_size", 2),
         in_channels=vae.config.latent_channels,
-        hidden_size=config.get("hidden_size", 768),
-        depth=config.get("depth", 12),
-        num_heads=config.get("num_heads", 12),
+        hidden_size=config.get("hidden_size", 1152),
+        depth=config.get("depth", 28),
+        num_heads=config.get("num_heads", 16),
         mlp_ratio=config.get("mlp_ratio", 4.0),
         context_dim=text_encoder.config.hidden_size,
-        cls_token_dim=config.get("cls_token_dim", 768),
+        cls_token_dim=config.get("cls_token_dim", 1024),
         z_dims=config.get("z_dims", [1024]),
-        projector_dim=config.get("projector_dim", 2048)
+        projector_dim=config.get("projector_dim", 1152)
     )
     
     transformer = transformer.to(dtype=torch.float32)
