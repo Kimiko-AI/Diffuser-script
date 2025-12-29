@@ -65,7 +65,7 @@ class SRDiTPipeline(DiffusionPipeline):
             generator=generator, device=device, dtype=prompt_embeds.dtype
         )
         
-        cls_dim = getattr(self.transformer, "final_layer", None).linear_cls.in_features \
+        cls_dim = getattr(self.transformer, "final_layer", None).linear_cls.out_features \
                   if hasattr(self.transformer, "final_layer") else 1024
         
         cls_latents = torch.randn((batch_size, cls_dim), generator=generator, device=device, dtype=prompt_embeds.dtype)
