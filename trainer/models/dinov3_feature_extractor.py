@@ -4,7 +4,7 @@ import timm
 from torchvision import transforms
 
 class DinoV3FeatureExtractor(nn.Module):
-    def __init__(self, model_name='vit_large_patch14_reg4_dinov2.lvd142m', device='cuda'):
+    def __init__(self, model_name='vit_large_patch16_dinov3.lvd1689m', device='cuda'):
         super().__init__()
         self.device = device
         # Initialize model

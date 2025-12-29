@@ -4,7 +4,7 @@ from .sr_dit_loader import load_sr_dit_components
 from .zimage_wrapper import ZImageWrapper
 from .sana_wrapper import SanaWrapper
 from .sr_dit_wrapper import SRDiTWrapper
-
+import torch
 def load_models(args, device=None, weight_dtype=torch.float32):
     """
     Factory function to load model components based on model_type.

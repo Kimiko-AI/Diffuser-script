@@ -40,7 +40,7 @@ def load_sr_dit_components(args, device=None, weight_dtype=torch.float32):
     if isinstance(resolution, list): resolution = resolution[0]
     input_size = resolution // 8
     
-    config = getattr(args, "config", {}) or {} 
+    config = getattr(args, "model_config", {}) or {} 
     
     transformer = SRDiT(
         input_size=input_size,

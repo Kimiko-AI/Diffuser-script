@@ -72,7 +72,7 @@ def parse_args():
     
     def flatten(d):
         for k, v in d.items():
-            if isinstance(v, dict) and k != "timestep_sampling": # Exception for known dict args
+            if isinstance(v, dict) and k != "timestep_sampling" and k != "model_config": # Exception for known dict args
                  flatten(v)
             else:
                 flat_config[k] = v
