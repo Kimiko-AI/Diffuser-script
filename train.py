@@ -186,7 +186,7 @@ def main():
 
     # Wrap DDP
     if world_size > 1:
-        model_wrapper = DDP(model_wrapper, device_ids=[local_rank], output_device=local_rank)
+        model_wrapper = DDP(model_wrapper, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
 
     # Optimizer
     optimizer = torch.optim.AdamW(
