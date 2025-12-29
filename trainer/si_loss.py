@@ -99,12 +99,20 @@ class SILoss:
         else:
             raise NotImplementedError()
 
-        model_output, cls_output = model(model_input, time_input.flatten(), **model_kwargs,
+        model_output, zs_out, cls_output = model(model_input, time_input.flatten(), **model_kwargs,
                                                     cls_token=cls_input)
 
         #denoising_loss
         denoising_loss = mean_flat((model_output - model_target) ** 2)
         denoising_loss_cls = mean_flat((cls_output - cls_target) ** 2)
+
+        proj_loss = torch.tensor(0.0, device=images.device)
+        if zs is not None and zs_out is not None:
+            for z, z_target in zip(zs_out, zs):
+                if z.shape[1] != z_target.shape[1]:
+                    proj_loss += mean_flat((z[:, 1:] - z_target) ** 2).mean()
+                else:
+                    proj_loss += mean_flat((z - z_target) ** 2).mean()
 
         cfm_target = torch.roll(model_target, shifts=1, dims=0)
         cfm_target_cls = torch.roll(cls_target, shifts=1, dims=0)
@@ -116,4 +124,4 @@ class SILoss:
             cfm_loss = -(((model_output - cfm_target) ** 2) * time_input).mean()
             cfm_loss_cls = -(((cls_output - cfm_target_cls) ** 2) * time_input).mean()
 
-        return denoising_loss, time_input, noises, denoising_loss_cls, cfm_loss, cfm_loss_cls
+        return denoising_loss, proj_loss, time_input, noises, denoising_loss_cls, cfm_loss, cfm_loss_cls
