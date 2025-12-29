@@ -126,7 +126,7 @@ class SRDiTWrapper(BaseWrapper):
         
         denoising_loss, proj_loss, _, _, denoising_loss_cls, cfm_loss, cfm_loss_cls = loss_dict
         
-        loss = denoising_loss + denoising_loss_cls + proj_loss + cfm_loss + cfm_loss_cls
+        loss = denoising_loss + denoising_loss_cls + proj_loss + cfm_loss * 0.05 + cfm_loss_cls * 0.05
         
         return {
             "loss": loss,
