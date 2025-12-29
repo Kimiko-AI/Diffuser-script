@@ -325,9 +325,8 @@ class SRDiT(nn.Module):
 
         nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
 
-    def unpatchify(self, x):
+    def unpatchify(self, x, h, w):
         c, p = self.in_channels, self.patch_size
-        h = w = int(x.shape[1] ** 0.5)
         x = x.reshape(shape=(x.shape[0], h, w, p, p, c))
         x = torch.einsum('nhwpqc->nchpwq', x)
         return x.reshape(shape=(x.shape[0], c, h * p, w * p))
@@ -368,4 +367,4 @@ class SRDiT(nn.Module):
 
         x_out, cls_token_out = self.final_layer(x, cond, cls_token)
 
-        return self.unpatchify(x_out), zs, cls_token_out
+        return self.unpatchify(x_out, patch_grid_size[0], patch_grid_size[1]), zs, cls_token_out
