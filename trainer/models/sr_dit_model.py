@@ -232,6 +232,9 @@ class SRDiT(nn.Module):
         h = w = int(x.shape[1] ** 0.5)
         return torch.einsum('nhwpqc->nchpwq', x.reshape(shape=(x.shape[0], h, w, p, p, c))).reshape(shape=(x.shape[0], c, h * p, w * p))
 
+    def enable_gradient_checkpointing(self):
+        self.gradient_checkpointing = True
+
     def forward(self, x, t, context, y=None, cls_token=None):
         patch_grid_size = (x.shape[-2] // self.patch_size, x.shape[-1] // self.patch_size)
         x = self.x_embedder(x)
@@ -241,9 +244,28 @@ class SRDiT(nn.Module):
         else: exit("cls_token is required")
         cond = self.t_embedder(t) + (self.y_embedder(y, self.training) if y is not None else 0)
         v1_full = None
+        
         for i in range(self.depth):
-            x = self.blocks[i](x, cond, context, self.feat_rope, None, v1_full, patch_grid_size)
+            if self.gradient_checkpointing and self.training:
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        return module(*inputs)
+                    return custom_forward
+                
+                # Checkpointing requires inputs to be tensors requiring grad. 
+                # x has grad. cond has grad. context has grad. 
+                # feat_rope, rope_ids, patch_grid_size are not requiring grad.
+                # checkpoint handles args.
+                x = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(self.blocks[i]),
+                    x, cond, context, self.feat_rope, None, v1_full, patch_grid_size,
+                    use_reentrant=False
+                )
+            else:
+                x = self.blocks[i](x, cond, context, self.feat_rope, None, v1_full, patch_grid_size)
+            
             if v1_full is None: v1_full = self.blocks[i].attn.v_last
+            
         zs = [proj(x.reshape(-1, x.shape[-1])).reshape(x.shape[0], -1, z_dim) for proj, z_dim in zip(self.projectors, self.z_dims)]
         x_out, cls_token_out = self.final_layer(x, cond, cls_token)
         return self.unpatchify(x_out), zs, cls_token_out
