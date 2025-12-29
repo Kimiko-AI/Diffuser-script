@@ -43,7 +43,7 @@ class BaseWrapper(nn.Module):
             text_inputs = self.tokenizer(
                 prompts,
                 padding="max_length",
-                max_length=self.tokenizer.model_max_length,
+                max_length=64,
                 truncation=True,
                 return_tensors="pt",
             )
