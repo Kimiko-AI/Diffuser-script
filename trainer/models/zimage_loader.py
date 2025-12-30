@@ -33,7 +33,7 @@ def load_zimage_components(args, device=None, weight_dtype=torch.float32):
     text_encoder = AutoModelForCausalLM.from_pretrained(
         args.text_encoder_path or args.pretrained_model_name_or_path, subfolder = "text_encoder",
         device_map=device_map,
-        torch_dtype=weight_dtype,
+        torch_dtype=torch.float32,
         low_cpu_mem_usage=True if device_map else False
     )
 
