@@ -99,13 +99,24 @@ class SILoss:
 
         # projection loss
         proj_loss = 0.
-        bsz = zs[0].shape[0]
         for i, (z, z_tilde) in enumerate(zip(zs, zs_tilde)):
-            for j, (z_j, z_tilde_j) in enumerate(zip(z, z_tilde)):
-                z_tilde_j = torch.nn.functional.normalize(z_tilde_j, dim=-1) 
-                z_j = torch.nn.functional.normalize(z_j, dim=-1) 
-                proj_loss += mean_flat(-(z_j * z_tilde_j).sum(dim=-1))
-        proj_loss /= (len(zs) * bsz)
+            # Fix shape mismatch: SRDiT output (z_tilde) includes CLS token at index 0
+            # DINO target (z) does not.
+            if z_tilde.shape[1] == z.shape[1] + 1:
+                z_tilde = z_tilde[:, 1:]
+            
+            # Normalize
+            z_tilde_norm = torch.nn.functional.normalize(z_tilde, dim=-1) 
+            z_norm = torch.nn.functional.normalize(z, dim=-1) 
+            
+            # Cosine similarity: (B, N, D) -> (B, N)
+            sim = (z_norm * z_tilde_norm).sum(dim=-1)
+            
+            # Negative Cosine Similarity, averaged over sequence length -> (B,)
+            proj_loss += -sim.mean(dim=1)
+
+        if len(zs) > 0:
+            proj_loss /= len(zs)
 
         cfm_target = torch.roll(model_target, shifts=1, dims=0)
         cfm_target_cls = torch.roll(cls_target, shifts=1, dims=0)
