@@ -48,10 +48,11 @@ def load_sana_components(args, device=None, weight_dtype=torch.float32):
     )
 
     # Load Transformer (SanaTransformer2DModel)
-    if args.model_config:
+    model_config = getattr(args, "model_config", None)
+    if model_config:
         # If training from scratch with config
-        print(f"Initializing SanaTransformer2DModel from config: {args.model_config}")
-        config = {k: v for k, v in args.model_config.items() if not k.startswith("_")}
+        print(f"Initializing SanaTransformer2DModel from config: {model_config}")
+        config = {k: v for k, v in model_config.items() if not k.startswith("_")}
         transformer = SanaTransformer2DModel(**config)
     else:
         transformer = SanaTransformer2DModel.from_pretrained(

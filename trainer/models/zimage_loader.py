@@ -50,11 +50,12 @@ def load_zimage_components(args, device=None, weight_dtype=torch.float32):
     TransformerClass = get_class_from_string(transformer_class_path)
 
     # Load Transformer
-    if args.model_config:
-        print(f"Initializing {TransformerClass.__name__} from config: {args.model_config}")
+    model_config = getattr(args, "model_config", None)
+    if model_config:
+        print(f"Initializing {TransformerClass.__name__} from config: {model_config}")
         # Filter out non-init args if any, usually config dict matches init
         # The config provided has keys like "_class_name" which we should ignore
-        config = {k: v for k, v in args.model_config.items() if not k.startswith("_")}
+        config = {k: v for k, v in model_config.items() if not k.startswith("_")}
         transformer = TransformerClass(**config)
     elif args.pretrained_model_name_or_path:
         transformer = TransformerClass.from_pretrained(
