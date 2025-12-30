@@ -39,7 +39,7 @@ def load_zimage_components(args, device=None, weight_dtype=torch.float32):
 
     # Load VAE (Usually frozen/pretrained)
     vae = AutoencoderKL.from_pretrained(
-        args.vae_path or args.pretrained_model_name_or_path, subfolder = "vae",
+        args.vae_path or args.pretrained_model_name_or_path,
         device_map=device_map,
         torch_dtype=torch.float32, # Usually kept in fp32
         low_cpu_mem_usage=True if device_map else False

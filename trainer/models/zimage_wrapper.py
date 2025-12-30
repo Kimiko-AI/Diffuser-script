@@ -7,6 +7,70 @@ from diffusers import ZImagePipeline
 from diffusers.training_utils import compute_density_for_timestep_sampling
 
 
+def _encode_prompt_monkeypatch(
+    self,
+    prompt: Union[str, List[str]],
+    device: Optional[torch.device] = None,
+    prompt_embeds: Optional[List[torch.FloatTensor]] = None,
+    max_sequence_length: int = 512,
+) -> List[torch.FloatTensor]:
+    device = device or self._execution_device
+
+    if prompt_embeds is not None:
+        return prompt_embeds
+
+    if isinstance(prompt, str):
+        prompt = [prompt]
+
+    for i, prompt_item in enumerate(prompt):
+        messages = [
+            {"role": "user", "content": prompt_item},
+        ]
+        prompt_item = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=True,
+        )
+        prompt[i] = prompt_item
+
+    text_inputs = self.tokenizer(
+        prompt,
+        padding="max_length",
+        max_length=max_sequence_length,
+        truncation=True,
+        return_tensors="pt",
+    )
+
+    text_input_ids = text_inputs.input_ids.to(device)
+    prompt_masks = text_inputs.attention_mask.to(device).bool()
+
+    encoder_outputs = self.text_encoder(
+        input_ids=text_input_ids,
+        attention_mask=prompt_masks,
+        output_hidden_states=True,
+    )
+
+    # Drop embedding layer
+    hidden_states = encoder_outputs.hidden_states[1:]
+
+    # Stack: (num_layers, batch, seq_len, hidden_size)
+    H = torch.stack(hidden_states, dim=0)
+    # L2 normalize across hidden_size dim
+    H_norm = torch.nn.functional.normalize(H, p=2, dim=-1)
+    # Result: (batch, seq_len, hidden_size)
+    prompt_embeds = H_norm.mean(dim=0)
+
+    embeddings_list = []
+
+    for i in range(len(prompt_embeds)):
+        embeddings_list.append(prompt_embeds[i][prompt_masks[i]])
+
+    return embeddings_list
+
+ZImagePipeline._encode_prompt = _encode_prompt_monkeypatch
+
+
 class ZImageWrapper(nn.Module):
     def __init__(self, transformer, vae, text_encoder, tokenizer, noise_scheduler, timestep_sampling_config=None,
                  caption_dropout_prob=0.0, afm_lambda=0.0, consistency_lambda=1.0):
@@ -90,6 +154,7 @@ class ZImageWrapper(nn.Module):
             prompt_embeds, _ = self.text_encoding_pipeline.encode_prompt(
                 prompts_in, max_sequence_length=64, device=device, do_classifier_free_guidance=False
             )
+
 
             # --- Encode Paraphrased Text (Positive Pair) ---
             prompt_embeds_pos = None
@@ -182,7 +247,6 @@ class ZImageWrapper(nn.Module):
         # Ensure eval mode
         was_training = self.transformer.training
         self.transformer.eval()
-        prompt = random.sample(prompt, 4)
         pipeline = ZImagePipeline(
             transformer=self.transformer,
             vae=self.vae,
@@ -202,8 +266,8 @@ class ZImageWrapper(nn.Module):
         images = pipeline(
             prompt=prompt,
             generator=generator,
-            num_inference_steps=20,
-            guidance_scale=4
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale
         ).images
 
         # Restore training state
