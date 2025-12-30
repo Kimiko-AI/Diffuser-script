@@ -94,8 +94,8 @@ class SILoss:
                                                     cls_token=cls_input)
 
         #denoising_loss
-        denoising_loss = mean_flat((model_output - model_target) ** 2)
-        denoising_loss_cls = mean_flat((cls_output - cls_target) ** 2)
+        denoising_loss = mean_flat((model_output - model_target) ** 2).mean()
+        denoising_loss_cls = mean_flat((cls_output - cls_target) ** 2).mean()
 
         # projection loss
         proj_loss = 0.
@@ -117,6 +117,9 @@ class SILoss:
 
         if len(zs) > 0:
             proj_loss /= len(zs)
+            
+        if isinstance(proj_loss, torch.Tensor) and proj_loss.ndim > 0:
+             proj_loss = proj_loss.mean()
 
         cfm_target = torch.roll(model_target, shifts=1, dims=0)
         cfm_target_cls = torch.roll(cls_target, shifts=1, dims=0)
