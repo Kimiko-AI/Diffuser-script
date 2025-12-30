@@ -97,6 +97,11 @@ class SILoss:
         denoising_loss = mean_flat((model_output - model_target) ** 2).mean()
         denoising_loss_cls = mean_flat((cls_output - cls_target) ** 2).mean()
 
+        # Add cosine similarity loss for CLS token (direction matching)
+        cls_output_norm = torch.nn.functional.normalize(cls_output, dim=-1)
+        cls_target_norm = torch.nn.functional.normalize(cls_target, dim=-1)
+        denoising_loss_cls += -(cls_output_norm * cls_target_norm).sum(dim=-1).mean()
+
         # projection loss
         proj_loss = 0.
         for i, (z, z_tilde) in enumerate(zip(zs, zs_tilde)):
