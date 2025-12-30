@@ -83,40 +83,32 @@ class SILoss:
         alpha_t, sigma_t, d_alpha_t, d_sigma_t = self.interpolant(time_input)
 
         model_input = alpha_t * images + sigma_t * noises
-        
-        # Adjust dimensions for cls_token broadcasting
-        # alpha_t is (B, 1, 1, 1), cls_token is (B, D)
-        alpha_t_cls = alpha_t.squeeze(-1).squeeze(-1)
-        sigma_t_cls = sigma_t.squeeze(-1).squeeze(-1)
-        d_alpha_t_cls = d_alpha_t.squeeze(-1).squeeze(-1) if isinstance(d_alpha_t, torch.Tensor) else d_alpha_t
-        d_sigma_t_cls = d_sigma_t.squeeze(-1).squeeze(-1) if isinstance(d_sigma_t, torch.Tensor) else d_sigma_t
-        
-        cls_input = alpha_t_cls * cls_token + sigma_t_cls * noises_cls
-        
+        cls_input = alpha_t.squeeze(-1).squeeze(-1) * cls_token + sigma_t.squeeze(-1).squeeze(-1) * noises_cls
         if self.prediction == 'v':
             model_target = d_alpha_t * images + d_sigma_t * noises
-            cls_target = d_alpha_t_cls * cls_token + d_sigma_t_cls * noises_cls
+            cls_target = d_alpha_t * cls_token + d_sigma_t * noises_cls
         else:
             raise NotImplementedError()
 
-        model_output, zs_out, cls_output = model(model_input, time_input.flatten(), **model_kwargs,
+        model_output, zs_tilde, cls_output = model(model_input, time_input.flatten(), **model_kwargs,
                                                     cls_token=cls_input)
 
         #denoising_loss
-        denoising_loss = mean_flat((model_output - model_target) ** 2).mean()
-        denoising_loss_cls = mean_flat((cls_output - cls_target) ** 2).mean()
+        denoising_loss = mean_flat((model_output - model_target) ** 2)
+        denoising_loss_cls = mean_flat((cls_output - cls_target) ** 2)
 
-        proj_loss = torch.tensor(0.0, device=images.device)
-        if zs is not None and zs_out is not None:
-            for z, z_target in zip(zs_out, zs):
-                if z.shape[1] != z_target.shape[1]:
-                    proj_loss += mean_flat((z[:, 1:] - z_target) ** 2).mean()
-                else:
-                    proj_loss += mean_flat((z - z_target) ** 2).mean()
+        # projection loss
+        proj_loss = 0.
+        bsz = zs[0].shape[0]
+        for i, (z, z_tilde) in enumerate(zip(zs, zs_tilde)):
+            for j, (z_j, z_tilde_j) in enumerate(zip(z, z_tilde)):
+                z_tilde_j = torch.nn.functional.normalize(z_tilde_j, dim=-1) 
+                z_j = torch.nn.functional.normalize(z_j, dim=-1) 
+                proj_loss += mean_flat(-(z_j * z_tilde_j).sum(dim=-1))
+        proj_loss /= (len(zs) * bsz)
 
         cfm_target = torch.roll(model_target, shifts=1, dims=0)
         cfm_target_cls = torch.roll(cls_target, shifts=1, dims=0)
-        
         if self.cfm_weighting == "uniform":
             cfm_loss = -((model_output - cfm_target) ** 2).mean()
             cfm_loss_cls = -((cls_output - cfm_target_cls) ** 2).mean()

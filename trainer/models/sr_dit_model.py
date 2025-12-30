@@ -119,7 +119,6 @@ class Attention(nn.Module):
             attn_drop=0.,
             proj_drop=0.,
             norm_layer=nn.RMSNorm,
-            use_v1_residual=True
     ):
         super().__init__()
         self.num_heads = num_heads
@@ -131,20 +130,13 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-        self.v1_lambda = nn.Parameter(torch.tensor(0.5)) if use_v1_residual else None
-        self.v_last = None
-
-    def forward(self, x, v1=None):
+    def forward(self, x):
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim)
         qkv = qkv.permute(2, 0, 3, 1, 4)
         q, k, v = qkv.unbind(0)
 
-        self.v_last = v
         q, k = self.q_norm(q), self.k_norm(k)
-
-        if v1 is not None and self.v1_lambda is not None:
-            v = self.v1_lambda * v1 + (1.0 - self.v1_lambda) * v
 
         x = F.scaled_dot_product_attention(q, k, v)
         x = x.transpose(1, 2).reshape(B, N, C)
@@ -190,7 +182,6 @@ class SRDiTBlock(nn.Module):
             hidden_size,
             num_heads,
             mlp_ratio=4.0,
-            use_v1_residual=True,
             context_dim=None,
             **block_kwargs
     ):
@@ -201,7 +192,6 @@ class SRDiTBlock(nn.Module):
             num_heads,
             qkv_bias=True,
             qk_norm=block_kwargs.get("qk_norm", False),
-            use_v1_residual=use_v1_residual
         )
 
         self.norm2 = nn.RMSNorm(hidden_size, elementwise_affine=False, eps=1e-6)
@@ -221,12 +211,12 @@ class SRDiTBlock(nn.Module):
             nn.Linear(hidden_size, 9 * hidden_size)
         )
 
-    def forward(self, x, cond, context, v1=None, patch_grid_size=None):
+    def forward(self, x, cond, context, patch_grid_size=None):
         shift_msa, scale_msa, gate_msa, shift_ca, scale_ca, gate_ca, shift_mlp, scale_mlp, gate_mlp = \
             self.adaLN_modulation(cond).chunk(9, dim=-1)
 
         x_norm1 = modulate(self.norm1(x), shift_msa, scale_msa)
-        x = x + gate_msa.unsqueeze(1) * self.attn(x_norm1, v1=v1)
+        x = x + gate_msa.unsqueeze(1) * self.attn(x_norm1)
 
         x_norm2 = modulate(self.norm2(x), shift_ca, scale_ca)
         x = x + gate_ca.unsqueeze(1) * self.cross_attn(x_norm2, context, context)[0]
@@ -314,7 +304,7 @@ class SRDiT(nn.Module):
         )
 
         self.blocks = nn.ModuleList([
-            SRDiTBlock(hidden_size, num_heads, mlp_ratio, i > 0, context_dim, **block_kwargs)
+            SRDiTBlock(hidden_size, num_heads, mlp_ratio, context_dim=context_dim, **block_kwargs)
             for i in range(depth)
         ])
 
@@ -387,14 +377,9 @@ class SRDiT(nn.Module):
              
         cond = cond + y_emb
 
-        v1_full = None
-
         for i in range(self.depth):
             # RoPE and rope_ids removed from arguments
-            x = self.blocks[i](x, cond, context, v1=v1_full, patch_grid_size=patch_grid_size)
-
-            if v1_full is None:
-                v1_full = self.blocks[i].attn.v_last
+            x = self.blocks[i](x, cond, context, patch_grid_size=patch_grid_size)
 
         zs = []
         for proj, z_dim in zip(self.projectors, self.z_dims):

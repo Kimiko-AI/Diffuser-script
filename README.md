@@ -1,40 +1,25 @@
-# ZImage Training Script
+# Diffuser-script
 
-This repository contains a training script for ZImage/Lumina2 based models using Diffusers and WebDataset.
+A flexible training framework for Diffusion Transformers (Z-Image, Sana, SR-DiT).
 
-## Setup
+## Quick Start
 
-1.  **Install Dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-    *Note: You may need to install a specific version of PyTorch compatible with your CUDA version.*
+1. **Install:**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-2.  **Configuration:**
-    Edit `config/config.yaml` to match your environment.
-    
-    **Key configurations to change:**
-    *   `data_url`: Path to your WebDataset tar files (e.g., `C:/data/shards/{00000..00010}.tar` or a generic URL).
-    *   `output_dir`: Directory where checkpoints and logs will be saved.
-    *   `pretrained_model_name_or_path`: If fine-tuning, set this. If training from scratch, leave `null` and ensure `model_config` is set.
+2. **Configure:**
+   Edit `config/config.yaml` or `config/sr_dit_xl.yaml`. Set `data_url` to your WebDataset shards.
 
-## Training
-
-Run the training script using `accelerate`:
-
-```bash
-accelerate launch train.py --config config/config.yaml
-```
+3. **Train:**
+   ```bash
+   torchrun --nproc_per_node=GPU_COUNT train.py --config config/config.yaml
+   ```
 
 ## Features
 
-*   **Dynamic Bucketing:** The data loader automatically groups images of similar aspect ratios into buckets to minimize padding and maximize efficiency. You can configure the base resolution and bucket step size in `config.yaml`.
-*   **WebDataset Support:** Efficient streaming of large datasets.
-*   **Configurable Model:** Supports training from scratch or fine-tuning, defined via YAML.
-*   **Mixed Precision:** Supports fp16 and bf16 (configured via `accelerate config`).
-
-## Directory Structure
-
-*   `train.py`: Main training entry point.
-*   `trainer/`: Contains model wrappers, dataset logic, and utilities.
-*   `config/`: Configuration files.
+- **Architectures:** Support for Z-Image, Sana, and SR-DiT.
+- **Data Loading:** WebDataset with dynamic bucketing or "Fast Mode" random crops.
+- **SR-DiT:** Coordinate-aware training with (x, y, w, h) conditioning.
+- **Optimization:** Mixed precision (bf16/fp16) and gradient norm logging.
