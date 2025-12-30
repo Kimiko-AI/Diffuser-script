@@ -164,7 +164,6 @@ def main():
         "text_encoder": text_encoder,
         "tokenizer": tokenizer,
         "noise_scheduler": noise_scheduler,
-        "args": args
     }
     
     # Add model specific args if needed
