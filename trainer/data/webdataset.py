@@ -247,8 +247,8 @@ def bucket_batcher(data_stream, batch_size=1, bucket_sizes=None, bucket_ratios=N
             continue
 
 
-# --- 3. Fast Batcher (Center Crop) ---
-def fast_batcher(data_stream, batch_size=1, resolution=256):
+# --- 3. SR-DiT Batcher (Random Resized Crop with Coords) ---
+def sr_dit_batcher(data_stream, batch_size=1, resolution=256):
     to_tensor = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize([0.5], [0.5])
@@ -259,43 +259,68 @@ def fast_batcher(data_stream, batch_size=1, resolution=256):
     for sample in data_stream:
         try:
             image = sample["image"]
+            orig_w, orig_h = image.size
             
-            # Resize shortest edge to resolution
-            w, h = image.size
-            if min(w, h) < resolution:
-                # If image is too small, we might skip or upscale. 
-                # Upscaling:
-                scale = resolution / min(w, h)
-                new_w, new_h = int(w * scale), int(h * scale)
-                image = image.resize((new_w, new_h), Image.BICUBIC)
-            elif min(w, h) > resolution:
-                # Downscale to resolution if needed (optional, but good for anti-aliasing before crop)
-                # But typically we just want to crop center. 
-                # If we want "fast", maybe we just crop directly if it covers 256.
-                # But standard practice is resize shortest to 256 then crop.
-                scale = resolution / min(w, h)
-                new_w, new_h = int(w * scale), int(h * scale)
-                image = image.resize((new_w, new_h), Image.BICUBIC)
+            # Random Resized Crop Logic (custom implementation to get coords)
+            # We want a square crop of size 'resolution'
+            # But "Random Resized Crop" usually means: pick a random area of the image, 
+            # and resize that area to (resolution, resolution).
+            # The standard PyTorch RandomResizedCrop params are scale=(0.08, 1.0), ratio=(3./4., 4./3.)
+            # Here user said: "random resized crop so that it is still 1:1 ratio"
+            # This implies we crop a square region from the original image (at random scale and position)
+            # and resize it to resolution x resolution.
             
-            # Center Crop
-            w, h = image.size
-            left = (w - resolution) // 2
-            top = (h - resolution) // 2
-            image = image.crop((left, top, left + resolution, top + resolution))
+            scale = np.random.uniform(0.5, 1.0) # Conservative scale range, can be adjusted
+            # crop size based on scale relative to the smaller dimension to ensure it fits
+            min_dim = min(orig_w, orig_h)
+            crop_size = int(min_dim * scale)
             
-            image_tensor = to_tensor(image)
+            # Ensure crop_size is at least something reasonable
+            if crop_size < 16: crop_size = 16
+            
+            # Random position
+            if orig_w > crop_size:
+                left = np.random.randint(0, orig_w - crop_size + 1)
+            else:
+                left = 0
+                
+            if orig_h > crop_size:
+                top = np.random.randint(0, orig_h - crop_size + 1)
+            else:
+                top = 0
+                
+            # Perform Crop
+            # (left, upper, right, lower)
+            crop_box = (left, top, left + crop_size, top + crop_size)
+            image_cropped = image.crop(crop_box)
+            
+            # Resize to target resolution
+            image_resized = image_cropped.resize((resolution, resolution), Image.BICUBIC)
+            
+            image_tensor = to_tensor(image_resized)
+            
+            # Normalized Coordinates: x (left), y (top), w, h
+            # Relative to original image size
+            norm_left = left / orig_w
+            norm_top = top / orig_h
+            norm_w = crop_size / orig_w
+            norm_h = crop_size / orig_h
+            
+            coords = torch.tensor([norm_left, norm_top, norm_w, norm_h], dtype=torch.float32)
             
             batch.append({
                 "pixels": image_tensor,
                 "prompts": sample["prompts"],
-                "full_prompts": sample["full_prompts"]
+                "full_prompts": sample["full_prompts"],
+                "crop_coords": coords
             })
 
             if len(batch) >= batch_size:
                 yield {
                     "pixels": torch.stack([x["pixels"] for x in batch]),
                     "prompts": [x["prompts"] for x in batch],
-                    "full_prompts": [x["full_prompts"] for x in batch]
+                    "full_prompts": [x["full_prompts"] for x in batch],
+                    "crop_coords": torch.stack([x["crop_coords"] for x in batch])
                 }
                 batch = []
 
@@ -360,13 +385,13 @@ def get_fast_wds_loader(url_pattern, batch_size, num_workers=4, is_train=True, r
     dataset = dataset.decode("pil", handler=wds.warn_and_continue)
     dataset = dataset.map(transform_sample, handler=wds.warn_and_continue)
 
-    # Use fast batcher
+    # Use sr_dit_batcher which does random resized crop and returns coords
     # Handle list resolution if passed
     if isinstance(resolution, (list, tuple)):
         resolution = resolution[0]
         
     dataset = dataset.compose(
-        partial(fast_batcher, batch_size=batch_size, resolution=resolution)
+        partial(sr_dit_batcher, batch_size=batch_size, resolution=resolution)
     )
 
     loader = wds.WebLoader(

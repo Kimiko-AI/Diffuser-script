@@ -134,6 +134,11 @@ class SRDiTWrapper(BaseWrapper):
         prompt_embeds = self.encode_text(prompts, device, weight_dtype)
         latents = self.encode_images(pixel_values, weight_dtype)
         
+        # Get crop coords from kwargs if present
+        crop_coords = kwargs.get("crop_coords", None)
+        if crop_coords is not None:
+            crop_coords = crop_coords.to(device=device, dtype=weight_dtype)
+        
         with torch.no_grad():
             cls_target, patch_tokens = self.dino.extract_features(pixel_values)
             cls_target, patch_tokens = cls_target.to(dtype=weight_dtype), patch_tokens.to(dtype=weight_dtype)
@@ -142,7 +147,7 @@ class SRDiTWrapper(BaseWrapper):
         loss_dict = self.si_loss(
             model=self.transformer,
             images=latents,
-            model_kwargs={'context': prompt_embeds},
+            model_kwargs={'context': prompt_embeds, 'y': crop_coords},
             zs=zs_target,
             cls_token=cls_target
         )

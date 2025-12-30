@@ -106,7 +106,8 @@ class SanaWrapper(nn.Module):
             device,
             paraphrased_prompts: Optional[List[str]] = None,
             weight_dtype=torch.float32,
-            consistency_lambda: float = 0.0
+            consistency_lambda: float = 0.0,
+            **kwargs
     ):
         # --- 1. Encode Text ---
         with torch.no_grad():

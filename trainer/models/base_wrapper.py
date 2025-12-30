@@ -59,7 +59,7 @@ class BaseWrapper(nn.Module):
             )
             
             if hasattr(outputs, "hidden_states"):
-                prompt_embeds = outputs.hidden_states[-1]
+                prompt_embeds = outputs.hidden_states[-3]
             elif hasattr(outputs, "last_hidden_state"):
                 prompt_embeds = outputs.last_hidden_state
             else:

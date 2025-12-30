@@ -75,21 +75,38 @@ class TimestepEmbedder(nn.Module):
         return self.mlp(t_freq)
 
 
-class LabelEmbedder(nn.Module):
-    def __init__(self, num_classes, hidden_size, dropout_prob):
+class CoordsEmbedder(nn.Module):
+    def __init__(self, hidden_size):
         super().__init__()
-        self.embedding_table = nn.Embedding(num_classes + (dropout_prob > 0), hidden_size)
-        self.num_classes = num_classes
-        self.dropout_prob = dropout_prob
+        self.mlp = nn.Sequential(
+            nn.Linear(4, hidden_size),
+            nn.SiLU(),
+            nn.Linear(hidden_size, hidden_size)
+        )
 
-    def forward(self, labels, train, force_drop_ids=None):
-        if (train and self.dropout_prob > 0) or force_drop_ids is not None:
-            if force_drop_ids is not None:
-                drop_ids = force_drop_ids == 1
-            else:
-                drop_ids = torch.rand(labels.shape[0], device=labels.device) < self.dropout_prob
-            labels = torch.where(drop_ids, self.num_classes, labels)
-        return self.embedding_table(labels)
+    def forward(self, y, train):
+        if y is None:
+            # Default to no crop: left=0, top=0, w=1, h=1 (normalized)
+            # Create a batch of defaults matching the expected batch size if possible
+            # But typically 'y' is passed from the wrapper. 
+            # If we don't have B from 'y', we might need it from another source or return a single vector.
+            # However, typically modulate expects [B, hidden_size].
+            # We'll assume if y is None, we create a default tensor on the fly using the device of the MLP.
+            # But wait, we don't know B here easily without x.
+            # Let's handle this in the wrapper or ensure y is passed.
+            # If y is None, we return a zero-like or default embedding that broadcasts?
+            # Better: create a default tensor [0, 0, 1, 1] and map it.
+            device = self.mlp[0].weight.device
+            dtype = self.mlp[0].weight.dtype
+            # We return a single embedding vector [1, hidden] that can be broadcasted by modulate logic
+            # if modulate allows broadcasting on batch dim (it usually does x + scale.unsqueeze(1)).
+            # But modulate usually expects [B, D]. 
+            # If y is None, the caller (SRDiT block) passes it to adaLN.
+            # Let's just return the embedding of [0, 0, 1, 1].
+            default_coords = torch.tensor([0.0, 0.0, 1.0, 1.0], device=device, dtype=dtype).unsqueeze(0)
+            return self.mlp(default_coords)
+            
+        return self.mlp(y)
 
 
 class Attention(nn.Module):
@@ -251,8 +268,6 @@ class SRDiT(nn.Module):
             depth=28,
             num_heads=16,
             mlp_ratio=4.0,
-            class_dropout_prob=0.1,
-            num_classes=1000,
             context_dim=768,
             cls_token_dim=768,
             z_dims=[1024],
@@ -268,8 +283,6 @@ class SRDiT(nn.Module):
             "depth": depth,
             "num_heads": num_heads,
             "mlp_ratio": mlp_ratio,
-            "class_dropout_prob": class_dropout_prob,
-            "num_classes": num_classes,
             "context_dim": context_dim,
             "cls_token_dim": cls_token_dim,
             "z_dims": z_dims,
@@ -291,7 +304,7 @@ class SRDiT(nn.Module):
         )
 
         self.t_embedder = TimestepEmbedder(hidden_size)
-        self.y_embedder = LabelEmbedder(num_classes, hidden_size, class_dropout_prob)
+        self.y_embedder = CoordsEmbedder(hidden_size)
 
         num_patches = (input_size // patch_size) ** 2
         self.num_patches = num_patches
@@ -333,7 +346,8 @@ class SRDiT(nn.Module):
         if self.x_embedder.bias is not None:
             nn.init.constant_(self.x_embedder.bias, 0)
 
-        nn.init.normal_(self.y_embedder.embedding_table.weight, std=0.02)
+        nn.init.xavier_uniform_(self.y_embedder.mlp[0].weight)
+        nn.init.xavier_uniform_(self.y_embedder.mlp[2].weight)
 
         for b in self.blocks:
             nn.init.constant_(b.adaLN_modulation[-1].weight, 0)
@@ -363,8 +377,15 @@ class SRDiT(nn.Module):
             raise ValueError("cls_token is required")
 
         cond = self.t_embedder(t)
-        if y is not None:
-            cond = cond + self.y_embedder(y, self.training)
+        
+        # Handle y (coords) embedding
+        y_emb = self.y_embedder(y, self.training)
+        
+        # If y_emb is a single vector (default no-crop), expand it to batch size
+        if y_emb.shape[0] == 1 and x.shape[0] > 1:
+             y_emb = y_emb.repeat(x.shape[0], 1)
+             
+        cond = cond + y_emb
 
         v1_full = None
 
@@ -437,5 +458,17 @@ class SRDiT(nn.Module):
             else:
                 raise FileNotFoundError(f"No weights found in {pretrained_model_name_or_path}")
 
-        model.load_state_dict(state_dict)
+        # Filter state_dict to ignore shape mismatches
+        model_state_dict = model.state_dict()
+        filtered_state_dict = {}
+        for k, v in state_dict.items():
+            if k in model_state_dict:
+                if v.shape == model_state_dict[k].shape:
+                    filtered_state_dict[k] = v
+                else:
+                    print(f"Ignoring key {k} due to shape mismatch: {v.shape} vs {model_state_dict[k].shape}")
+            else:
+                print(f"Ignoring unexpected key {k}")
+
+        model.load_state_dict(filtered_state_dict, strict=False)
         return model

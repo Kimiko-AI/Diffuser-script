@@ -241,7 +241,13 @@ def main():
                         state_dict = torch.load(bin_path, map_location="cpu")
                     
                     if state_dict is not None:
-                        transformer.load_state_dict(state_dict)
+                        # Load with strict=False to ignore shape mismatches
+                        missing, unexpected = transformer.load_state_dict(state_dict, strict=False)
+                        if rank == 0:
+                            if len(missing) > 0:
+                                print(f"Missing keys when loading transformer: {len(missing)}")
+                            if len(unexpected) > 0:
+                                print(f"Unexpected keys when loading transformer: {len(unexpected)}")
                         del state_dict
                     else:
                         if rank == 0:
@@ -289,11 +295,13 @@ def main():
             with context:
                 images = batch["pixels"].to(device, dtype=weight_dtype)
                 prompts = batch["prompts"]
+                crop_coords = batch.get("crop_coords", None)
 
                 with amp_context:
                     model_output = model_wrapper(
                         pixel_values=images,
                         prompts=prompts,
+                        crop_coords=crop_coords,
                         device=device,
                         weight_dtype=weight_dtype
                     )
@@ -318,7 +326,16 @@ def main():
         # Step
         if args.max_grad_norm > 0:
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model_wrapper.parameters(), args.max_grad_norm)
+            grad_norm = torch.nn.utils.clip_grad_norm_(model_wrapper.parameters(), args.max_grad_norm)
+        else:
+            # Calculate grad norm even if not clipping for logging
+            total_norm = 0.0
+            for p in model_wrapper.parameters():
+                if p.grad is not None:
+                    param_norm = p.grad.detach().data.norm(2)
+                    total_norm += param_norm.item() ** 2
+            grad_norm = total_norm ** 0.5
+            grad_norm = torch.tensor(grad_norm) # consistency
 
         scaler.step(optimizer)
         scaler.update()
@@ -330,7 +347,7 @@ def main():
         # Logs
         if rank == 0:
             current_lr = lr_scheduler.get_last_lr()[0]
-            logs = {"lr": current_lr}
+            logs = {"lr": current_lr, "grad_norm": grad_norm.item()}
             logs.update(accum_logs) # Add all accumulated losses
             
             if _has_wandb and wandb.run:
