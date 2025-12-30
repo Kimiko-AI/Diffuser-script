@@ -187,7 +187,7 @@ class ZImageWrapper(nn.Module):
         model_pred = self.transformer(
             noisy_latents_input,
             u.flatten(),
-            prompt_embeds,
+            [p.to(dtype=weight_dtype) for p in prompt_embeds],
             return_dict=False
         )[0]
         model_pred = torch.stack(model_pred, dim=0).squeeze(2)
@@ -204,7 +204,7 @@ class ZImageWrapper(nn.Module):
             model_pred_pos = self.transformer(
                 noisy_latents_input,  # Same noisy input
                 u.flatten(),  # Same timestep
-                prompt_embeds_pos,  # Different (paraphrased) text
+                [p.to(dtype=weight_dtype) for p in prompt_embeds_pos],  # Different (paraphrased) text
                 return_dict=False
             )[0]
             model_pred_pos = torch.stack(model_pred_pos, dim=0).squeeze(2)
