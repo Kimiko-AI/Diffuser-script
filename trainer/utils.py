@@ -27,7 +27,7 @@ Trained on {base_model}.
     )
     populate_model_card(model_card, tags=["text-to-image", "lumina2"]).save(os.path.join(repo_folder, "README.md"))
 
-
+@torch.no_grad()
 def log_validation(model_wrapper, args, global_step, device):
     validation_prompts = args.validation_prompt
     if validation_prompts is None:
@@ -60,11 +60,6 @@ def log_validation(model_wrapper, args, global_step, device):
         for i, img in enumerate(images_cond):
             all_images.append((validation_prompts[i], img))
 
-    # 2. Unconditional Generation (4 random samples, scale=1.0)
-    # We use a distinct seed offset or just rely on the generator state if seed is None
-    # If args.seed is set, we might get the same noise as the first batch if we don't offset.
-    # But usually generate() creates a new generator or handles state. 
-    # Let's use args.seed + 1 for unconditional to ensure variety if seed is fixed.
     uncond_seed = args.seed + 1 if args.seed is not None else None
     
     uncond_prompts = [""] * 4

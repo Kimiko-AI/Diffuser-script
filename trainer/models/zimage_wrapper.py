@@ -73,7 +73,7 @@ ZImagePipeline._encode_prompt = _encode_prompt_monkeypatch
 
 class ZImageWrapper(nn.Module):
     def __init__(self, transformer, vae, text_encoder, tokenizer, noise_scheduler, timestep_sampling_config=None,
-                 caption_dropout_prob=0.0, afm_lambda=0.0, consistency_lambda=1.0):
+                 caption_dropout_prob=0.0, afm_lambda=0.0, consistency_lambda=1.0, args=None, **kwargs):
         super().__init__()
         self.transformer = transformer
         # Use lists to prevent nn.Module from registering them as submodules
