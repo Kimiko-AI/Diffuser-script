@@ -57,7 +57,7 @@ training:
 
   # Validation / Visualization
   validation_steps: 500
-  validation_num_inference_steps: 50
+  validation_num_inference_steps: 30
   validation_guidance_scale: 4.0
   validation_prompt:
     - "general, shana, 1girl >:) black_thighhighs bow closed_mouth grey_bow grey_sailor_collar grey_skirt hair_between_eyes holding holding_sword holding_weapon katana long_hair looking_at_viewer puffy_short_sleeves puffy_sleeves red_eyes red_hair sailor_collar school_uniform serafuku shirt short_sleeves skirt smile solo standing sword thighhighs v-shaped_eyebrows very_long_hair weapon white_background white_shirt"

@@ -77,20 +77,12 @@ class Lumina2Wrapper(nn.Module):
         text_inputs = self.tokenizer(
             prompt,
             padding="max_length",
-            max_length=128,
+            max_length=max_sequence_length,
             truncation=True,
             return_tensors="pt",
         )
 
         text_input_ids = text_inputs.input_ids.to(device)
-        untruncated_ids = self.tokenizer(prompt, padding="longest", return_tensors="pt").input_ids.to(device)
-
-        if untruncated_ids.shape[-1] >= text_input_ids.shape[-1] and not torch.equal(text_input_ids, untruncated_ids):
-            removed_text = self.tokenizer.batch_decode(untruncated_ids[:, max_sequence_length - 1 : -1])
-            logger.warning(
-                "The following part of your input was truncated because Gemma can only handle sequences up to"
-                f" {max_sequence_length} tokens: {removed_text}"
-            )
 
         prompt_attention_mask = text_inputs.attention_mask.to(device)
         encoder_outputs = self.text_encoder(
@@ -316,8 +308,8 @@ class Lumina2Wrapper(nn.Module):
             num_images: int = 1,
             seed: Optional[int] = None,
             device: Optional[torch.device] = None,
-            height: int = 512, 
-            width: int = 512,
+            height: int = 256,
+            width: int = 256,
             **kwargs
     ) -> List[Any]:
         if device is None:
