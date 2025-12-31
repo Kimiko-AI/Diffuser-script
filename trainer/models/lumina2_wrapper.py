@@ -12,19 +12,27 @@ logger = logging.getLogger(__name__)
 def _encode_prompt_lumina2_monkeypatch(
     self,
     prompt: Union[str, List[str]],
-    device: Optional[torch.device] = None,
-    do_classifier_free_guidance: bool = True,
-    negative_prompt: Union[str, List[str]] = None,
-    num_images_per_prompt: int = 1,
-    prompt_embeds: Optional[torch.Tensor] = None,
-    negative_prompt_embeds: Optional[torch.Tensor] = None,
-    prompt_attention_mask: Optional[torch.Tensor] = None,
-    negative_prompt_attention_mask: Optional[torch.Tensor] = None,
-    system_prompt: Optional[str] = None,
-    max_sequence_length: int = 256,
+    *args,
+    **kwargs
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     
+    # Extract args with defaults, prioritizing kwargs
+    device = kwargs.get("device", None)
+    # If device was passed positionally (very unlikely for device, but possible if signature mismatch)
+    # we ignore positional args for device if it's in kwargs.
+    # If it's NOT in kwargs, we default to self._execution_device
+    
     device = device or self._execution_device
+
+    do_classifier_free_guidance = kwargs.get("do_classifier_free_guidance", True)
+    negative_prompt = kwargs.get("negative_prompt", None)
+    num_images_per_prompt = kwargs.get("num_images_per_prompt", 1)
+    prompt_embeds = kwargs.get("prompt_embeds", None)
+    negative_prompt_embeds = kwargs.get("negative_prompt_embeds", None)
+    prompt_attention_mask = kwargs.get("prompt_attention_mask", None)
+    negative_prompt_attention_mask = kwargs.get("negative_prompt_attention_mask", None)
+    max_sequence_length = kwargs.get("max_sequence_length", 256)
+    system_prompt = kwargs.get("system_prompt", None)
 
     # Default system prompt if not provided (Lumina2 specific)
     if system_prompt is None:
