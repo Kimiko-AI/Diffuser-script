@@ -351,10 +351,14 @@ class Lumina2Wrapper(nn.Module):
         pipeline.set_progress_bar_config(disable=True)
         
         # Bind methods to the pipeline instance
-        import types
-        pipeline._get_gemma_prompt_embeds = types.MethodType(self._get_gemma_prompt_embeds, pipeline)
-        pipeline.encode_prompt = types.MethodType(self.encode_prompt, pipeline)
-        # We also need to inject system_prompt into the pipeline instance or method needs to access it from 'self'
+        # We simply assign the bound methods from the wrapper to the pipeline.
+        # This ensures 'self' inside these methods remains the wrapper instance,
+        # which holds the correct tokenizer, text_encoder, and configuration.
+        pipeline._get_gemma_prompt_embeds = self._get_gemma_prompt_embeds
+        pipeline.encode_prompt = self.encode_prompt
+        
+        # We also ensure the pipeline has access to system_prompt if it needs it 
+        # (though our wrapper.encode_prompt uses self.system_prompt from wrapper)
         pipeline.system_prompt = self.system_prompt
 
         generator = torch.Generator(device=device).manual_seed(seed) if seed else None
