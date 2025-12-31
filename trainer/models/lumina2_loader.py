@@ -4,7 +4,7 @@ from diffusers import (
     FlowMatchEulerDiscreteScheduler,
     Lumina2Transformer2DModel,
 )
-from transformers import AutoTokenizer, Gemma2Model
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 def load_lumina2_components(args, device=None, weight_dtype=torch.float32):
     """
@@ -36,9 +36,9 @@ def load_lumina2_components(args, device=None, weight_dtype=torch.float32):
     if weight_dtype == torch.float16 or weight_dtype == torch.bfloat16:
         text_encoder_dtype = weight_dtype # Keep consistent
     
-    text_encoder = Gemma2Model.from_pretrained(
+    text_encoder = AutoModelForCausalLM.from_pretrained(
         args.pretrained_model_name_or_path, 
-        subfolder="text_encoder", 
+        subfolder="text_encoder",
         device_map=device_map,
         torch_dtype=text_encoder_dtype,
         revision=getattr(args, "revision", None),
@@ -50,7 +50,6 @@ def load_lumina2_components(args, device=None, weight_dtype=torch.float32):
     # The provided script keeps VAE in float32.
     vae = AutoencoderKL.from_pretrained(
         args.pretrained_model_name_or_path,
-        subfolder="vae",
         device_map=device_map,
         torch_dtype=torch.float32, 
         revision=getattr(args, "revision", None),

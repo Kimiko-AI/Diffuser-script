@@ -2,10 +2,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import random
-from typing import List, Optional, Union, Any
+import logging
+from typing import List, Optional, Union, Any, Tuple
 from diffusers import Lumina2Pipeline
 from diffusers.training_utils import compute_density_for_timestep_sampling, compute_loss_weighting_for_sd3
-from peft import LoraConfig
+
+logger = logging.getLogger(__name__)
 
 class Lumina2Wrapper(nn.Module):
     def __init__(self, transformer, vae, text_encoder, tokenizer, noise_scheduler, args=None):
@@ -21,45 +23,24 @@ class Lumina2Wrapper(nn.Module):
         # Freeze frozen components
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
-        self.transformer.requires_grad_(False) # Freeze base transformer first
-
-        # Setup LoRA
-        lora_rank = getattr(args, "lora_rank", 4)
-        if lora_rank > 0:
-            lora_alpha = getattr(args, "lora_alpha", lora_rank)
-            lora_dropout = getattr(args, "lora_dropout", 0.0)
-            lora_target_modules = getattr(args, "lora_target_modules", ["to_k", "to_q", "to_v", "to_out.0"])
-            
-            if isinstance(lora_target_modules, str):
-                lora_target_modules = [x.strip() for x in lora_target_modules.split(",")]
-
-            transformer_lora_config = LoraConfig(
-                r=lora_rank,
-                lora_alpha=lora_alpha,
-                lora_dropout=lora_dropout,
-                init_lora_weights="gaussian",
-                target_modules=lora_target_modules,
-            )
-            self.transformer.add_adapter(transformer_lora_config)
-            # Make sure adapter is trainable
-            # add_adapter usually sets requires_grad for adapter params to True
-        else:
-            # If not LoRA, unfreeze transformer
-            self.transformer.requires_grad_(True)
-            if getattr(args, "gradient_checkpointing", False):
-                self.transformer.enable_gradient_checkpointing()
+        
+        # Unfreeze transformer for full fine-tuning
+        self.transformer.requires_grad_(True)
+        if getattr(args, "gradient_checkpointing", False):
+            self.transformer.enable_gradient_checkpointing()
 
         # Helper pipeline for encoding text
         # We initialize it with None for components we don't need immediately to save memory/time
-        # But we need text_encoder and tokenizer
         self.text_encoding_pipeline = Lumina2Pipeline(
-            vae=self.vae, # Needed for structure? No, from_pretrained usually handles it.
-            # We construct it manually
             transformer=self.transformer, 
             text_encoder=self.text_encoder,
             tokenizer=self.tokenizer,
-            scheduler=self.noise_scheduler
+            scheduler=self.noise_scheduler,
+            vae=self.vae
         )
+        
+        # Set system prompt default
+        self.system_prompt = getattr(args, "system_prompt", "You are an assistant designed to generate high-quality images.")
 
     @property
     def vae(self):
@@ -82,6 +63,146 @@ class Lumina2Wrapper(nn.Module):
             sigma = sigma.unsqueeze(-1)
         return sigma
 
+    # --- Custom Text Encoding Logic ---
+
+    def _get_gemma_prompt_embeds(
+        self,
+        prompt: Union[str, List[str]],
+        device: Optional[torch.device] = None,
+        max_sequence_length: int = 256,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        device = device or self.text_encoder.device
+        prompt = [prompt] if isinstance(prompt, str) else prompt
+        
+        text_inputs = self.tokenizer(
+            prompt,
+            padding="max_length",
+            max_length=max_sequence_length,
+            truncation=True,
+            return_tensors="pt",
+        )
+
+        text_input_ids = text_inputs.input_ids.to(device)
+        untruncated_ids = self.tokenizer(prompt, padding="longest", return_tensors="pt").input_ids.to(device)
+
+        if untruncated_ids.shape[-1] >= text_input_ids.shape[-1] and not torch.equal(text_input_ids, untruncated_ids):
+            removed_text = self.tokenizer.batch_decode(untruncated_ids[:, max_sequence_length - 1 : -1])
+            logger.warning(
+                "The following part of your input was truncated because Gemma can only handle sequences up to"
+                f" {max_sequence_length} tokens: {removed_text}"
+            )
+
+        prompt_attention_mask = text_inputs.attention_mask.to(device)
+        encoder_outputs = self.text_encoder(
+            text_input_ids, attention_mask=prompt_attention_mask, output_hidden_states=True
+        )
+        
+        # Adaptation: Layer-wise pooling
+        # Drop embedding layer
+        hidden_states = encoder_outputs.hidden_states[1:]
+
+        # Stack: (num_layers, batch, seq_len, hidden_size)
+        H = torch.stack(hidden_states, dim=0)
+        # L2 normalize across hidden_size dim
+        H_norm = torch.nn.functional.normalize(H, p=2, dim=-1)
+        # Result: (batch, seq_len, hidden_size)
+        prompt_embeds = H_norm.mean(dim=0)
+
+        if self.text_encoder is not None:
+            dtype = self.text_encoder.dtype
+        elif self.transformer is not None:
+            dtype = self.transformer.dtype
+        else:
+            dtype = None
+
+        prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
+
+        _, seq_len, _ = prompt_embeds.shape
+
+        return prompt_embeds, prompt_attention_mask
+
+    def encode_prompt(
+        self,
+        prompt: Union[str, List[str]],
+        do_classifier_free_guidance: bool = True,
+        negative_prompt: Union[str, List[str]] = None,
+        num_images_per_prompt: int = 1,
+        device: Optional[torch.device] = None,
+        prompt_embeds: Optional[torch.Tensor] = None,
+        negative_prompt_embeds: Optional[torch.Tensor] = None,
+        prompt_attention_mask: Optional[torch.Tensor] = None,
+        negative_prompt_attention_mask: Optional[torch.Tensor] = None,
+        system_prompt: Optional[str] = None,
+        max_sequence_length: int = 256,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        if device is None:
+            device = self.text_encoder.device
+
+        prompt = [prompt] if isinstance(prompt, str) else prompt
+        if prompt is not None:
+            batch_size = len(prompt)
+        else:
+            batch_size = prompt_embeds.shape[0]
+
+        if system_prompt is None:
+            system_prompt = self.system_prompt
+        
+        # Apply system prompt formatting if prompts are raw
+        if prompt is not None:
+            prompt = [system_prompt + " <Prompt Start> " + p for p in prompt]
+
+        if prompt_embeds is None:
+            prompt_embeds, prompt_attention_mask = self._get_gemma_prompt_embeds(
+                prompt=prompt,
+                device=device,
+                max_sequence_length=max_sequence_length,
+            )
+
+        batch_size, seq_len, _ = prompt_embeds.shape
+        # duplicate text embeddings and attention mask for each generation per prompt
+        prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
+        prompt_embeds = prompt_embeds.view(batch_size * num_images_per_prompt, seq_len, -1)
+        prompt_attention_mask = prompt_attention_mask.repeat(num_images_per_prompt, 1)
+        prompt_attention_mask = prompt_attention_mask.view(batch_size * num_images_per_prompt, -1)
+
+        # Get negative embeddings for classifier free guidance
+        if do_classifier_free_guidance and negative_prompt_embeds is None:
+            negative_prompt = negative_prompt if negative_prompt is not None else ""
+
+            # Normalize str to list
+            negative_prompt = batch_size * [negative_prompt] if isinstance(negative_prompt, str) else negative_prompt
+
+            if prompt is not None and type(prompt) is not type(negative_prompt):
+                raise TypeError(
+                    f"`negative_prompt` should be the same type to `prompt`, but got {type(negative_prompt)} !="
+                    f" {type(prompt)}."
+                )
+            elif isinstance(negative_prompt, str):
+                negative_prompt = [negative_prompt]
+            elif batch_size != len(negative_prompt):
+                raise ValueError(
+                    f"`negative_prompt`: {negative_prompt} has batch size {len(negative_prompt)}, but `prompt`:"
+                    f" {prompt} has batch size {batch_size}. Please make sure that passed `negative_prompt` matches"
+                    " the batch size of `prompt`."
+                )
+            negative_prompt_embeds, negative_prompt_attention_mask = self._get_gemma_prompt_embeds(
+                prompt=negative_prompt,
+                device=device,
+                max_sequence_length=max_sequence_length,
+            )
+
+            batch_size, seq_len, _ = negative_prompt_embeds.shape
+            # duplicate text embeddings and attention mask for each generation per prompt
+            negative_prompt_embeds = negative_prompt_embeds.repeat(1, num_images_per_prompt, 1)
+            negative_prompt_embeds = negative_prompt_embeds.view(batch_size * num_images_per_prompt, seq_len, -1)
+            negative_prompt_attention_mask = negative_prompt_attention_mask.repeat(num_images_per_prompt, 1)
+            negative_prompt_attention_mask = negative_prompt_attention_mask.view(
+                batch_size * num_images_per_prompt, -1
+            )
+
+        return prompt_embeds, prompt_attention_mask, negative_prompt_embeds, negative_prompt_attention_mask
+
+
     def forward(
             self,
             pixel_values,
@@ -100,12 +221,13 @@ class Lumina2Wrapper(nn.Module):
             max_sequence_length = getattr(self.args, "max_sequence_length", 256)
             system_prompt = getattr(self.args, "system_prompt", None)
 
-            # Lumina2Pipeline.encode_prompt
-            prompt_embeds, prompt_attention_mask, _, _ = self.text_encoding_pipeline.encode_prompt(
+            # Use local encode_prompt
+            prompt_embeds, prompt_attention_mask, _, _ = self.encode_prompt(
                 prompt=prompts_in,
+                do_classifier_free_guidance=False,
+                device=device,
                 max_sequence_length=max_sequence_length,
-                system_prompt=system_prompt,
-                device=device
+                system_prompt=system_prompt
             )
 
             prompt_embeds = prompt_embeds.to(dtype=weight_dtype)
@@ -118,8 +240,6 @@ class Lumina2Wrapper(nn.Module):
             latents = posterior.sample()
             
             # Lumina2 scaling/shifting
-            # (model_input - vae_config_shift_factor) * vae_config_scaling_factor
-            # Check if shift_factor exists (SD3/Lumina logic usually has it)
             shift_factor = getattr(self.vae.config, "shift_factor", None)
             scaling_factor = self.vae.config.scaling_factor
             
@@ -135,28 +255,30 @@ class Lumina2Wrapper(nn.Module):
         noise = torch.randn_like(latents)
 
         # Timestep sampling
-        weighting_scheme = getattr(self.args, "weighting_scheme", "none") # Default none per script?
-        # Script says default="none"
+        # Use args directly if flat or nested dict if structured
+        # config.yaml structure: timestep_sampling: {weighting_scheme: ...}
+        # But args flattening in train.py keeps subdicts? No, I flattened it recursively.
+        # But for 'timestep_sampling' I said I'd flatten. 
+        # Let's check train.py again. 
+        # "timestep_sampling" key in args? 
+        # I added exception in flatten(): k != "timestep_sampling"
+        # So args.timestep_sampling should be a dict.
+        
+        ts_config = getattr(self.args, "timestep_sampling", {})
+        weighting_scheme = ts_config.get("weighting_scheme", "uniform")
         
         u = compute_density_for_timestep_sampling(
             weighting_scheme=weighting_scheme,
             batch_size=bsz,
-            logit_mean=getattr(self.args, "logit_mean", 0.0),
-            logit_std=getattr(self.args, "logit_std", 1.0),
-            mode_scale=getattr(self.args, "mode_scale", 1.29),
+            logit_mean=ts_config.get("logit_mean", 0.0),
+            logit_std=ts_config.get("logit_std", 1.0),
+            mode_scale=ts_config.get("mode_scale", 1.29),
         ).to(device)
 
         indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
         timesteps = self.noise_scheduler.timesteps[indices].to(device=device)
 
         # Add noise
-        # zt = (1 - texp) * x + texp * z1
-        # Lumina2 reverses lerp: sigma of 1.0 means `model_input`?
-        # Script: noisy_model_input = (1.0 - sigmas) * noise + sigmas * model_input
-        # Let's verify sigma definition.
-        # If sigma=1 -> model_input (clean). If sigma=0 -> noise.
-        # This is opposite to standard SD.
-        
         sigmas = self.get_sigmas(timesteps, n_dim=latents.ndim, dtype=latents.dtype, device=device)
         noisy_latents = (1.0 - sigmas) * noise + sigmas * latents
 
@@ -175,7 +297,6 @@ class Lumina2Wrapper(nn.Module):
         # --- 5. Calculate Loss ---
         weighting = compute_loss_weighting_for_sd3(weighting_scheme=weighting_scheme, sigmas=sigmas)
         
-        # Target = model_input - noise
         target = latents - noise
 
         loss = torch.mean(
@@ -191,17 +312,20 @@ class Lumina2Wrapper(nn.Module):
             self,
             prompt: Union[str, List[str]],
             num_inference_steps: int = 20,
-            guidance_scale: float = 4.0, # Default per Lumina usually
+            guidance_scale: float = 4.0, 
             num_images: int = 1,
             seed: Optional[int] = None,
             device: Optional[torch.device] = None,
-            height: int = 512, # Lumina2 resolution
+            height: int = 512, 
             width: int = 512,
             **kwargs
     ) -> List[Any]:
         if device is None:
             device = next(self.transformer.parameters()).device
 
+        # Patch pipeline with our custom encoder methods
+        # To avoid patching the class globally or creating a new subclass dynamically, 
+        # we can just assign the methods to the instance.
         pipeline = Lumina2Pipeline(
             transformer=self.transformer,
             vae=self.vae,
@@ -211,6 +335,13 @@ class Lumina2Wrapper(nn.Module):
         )
         pipeline.to(device)
         pipeline.set_progress_bar_config(disable=True)
+        
+        # Bind methods to the pipeline instance
+        import types
+        pipeline._get_gemma_prompt_embeds = types.MethodType(self._get_gemma_prompt_embeds, pipeline)
+        pipeline.encode_prompt = types.MethodType(self.encode_prompt, pipeline)
+        # We also need to inject system_prompt into the pipeline instance or method needs to access it from 'self'
+        pipeline.system_prompt = self.system_prompt
 
         generator = torch.Generator(device=device).manual_seed(seed) if seed else None
         
@@ -222,7 +353,7 @@ class Lumina2Wrapper(nn.Module):
             num_inference_steps=num_inference_steps,
             guidance_scale=guidance_scale,
             num_images_per_prompt=num_images,
-            system_prompt=getattr(self.args, "system_prompt", None)
+            system_prompt=self.system_prompt
         ).images
 
         return images, prompt
