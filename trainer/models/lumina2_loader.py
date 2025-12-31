@@ -65,7 +65,7 @@ def load_lumina2_components(args, device=None, weight_dtype=torch.float32):
             args.pretrained_model_name_or_path, 
             subfolder="transformer", 
             device_map=device_map,
-            torch_dtype=weight_dtype,
+            torch_dtype=torch.float32,
             revision=getattr(args, "revision", None),
             variant=getattr(args, "variant", None),
         )
