@@ -276,7 +276,20 @@ class Lumina2Wrapper(nn.Module):
         ).to(device)
 
         indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
-        timesteps = self.noise_scheduler.timesteps[indices].to(device=device)
+        # Ensure indices and timesteps are on the same device
+        # We clamp indices just in case, though u is usually [0, 1)
+        indices = indices.clamp(0, self.noise_scheduler.config.num_train_timesteps - 1)
+        
+        # Check if timesteps is present (some schedulers need set_timesteps called)
+        if hasattr(self.noise_scheduler, "timesteps") and self.noise_scheduler.timesteps is not None:
+             sched_timesteps = self.noise_scheduler.timesteps.to(device)
+             timesteps = sched_timesteps[indices]
+        else:
+             # Fallback if timesteps is not populated (though error implies it was a CPU tensor)
+             # Usually FlowMatch scheduler has reversed 1000 -> 0 or 0 -> 1000
+             # Default to linspace if missing
+             timesteps = torch.linspace(0, self.noise_scheduler.config.num_train_timesteps - 1, self.noise_scheduler.config.num_train_timesteps, device=device).flip(0)
+             timesteps = timesteps[indices]
 
         # Add noise
         sigmas = self.get_sigmas(timesteps, n_dim=latents.ndim, dtype=latents.dtype, device=device)
