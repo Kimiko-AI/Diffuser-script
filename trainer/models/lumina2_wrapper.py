@@ -341,16 +341,16 @@ class Lumina2Wrapper(nn.Module):
         pipeline.system_prompt = self.system_prompt
 
         generator = torch.Generator(device=device).manual_seed(seed) if seed else None
-        
-        images = pipeline(
-            prompt=prompt,
-            height=height,
-            width=width,
-            generator=generator,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=guidance_scale,
-            num_images_per_prompt=num_images,
-            system_prompt=self.system_prompt
-        ).images
+        with torch.amp.autocast(device_type=device_type, dtype=torch.bfloat16):
+            images = pipeline(
+                prompt=prompt,
+                height=height,
+                width=width,
+                generator=generator,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                num_images_per_prompt=num_images,
+                system_prompt=self.system_prompt
+            ).images
 
         return images, prompt
