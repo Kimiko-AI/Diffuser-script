@@ -362,7 +362,7 @@ def main():
         # === VALIDATION & SAVING ===
         # We should sync before saving/validating
 
-        if global_step % args.checkpointing_steps == 0 or global_step % args.validation_steps == 0:
+        if global_step % args.checkpointing_steps == 0 or global_step % args.validation_steps == 0 or global_step = 1:
             if world_size > 1:
                 dist.barrier()
 

@@ -42,6 +42,7 @@ def load_lumina2_components(args, device=None, weight_dtype=torch.float32):
         torch_dtype=text_encoder_dtype,
         revision=getattr(args, "revision", None),
         variant=getattr(args, "variant", None),
+        low_cpu_mem_usage=True if device_map else False,
     )
 
     # Load VAE (AutoencoderKL)
@@ -51,6 +52,7 @@ def load_lumina2_components(args, device=None, weight_dtype=torch.float32):
         torch_dtype=torch.bfloat16,
         revision=getattr(args, "revision", None),
         variant=getattr(args, "variant", None),
+        low_cpu_mem_usage=True if device_map else False,
     )
 
     # Load Transformer
@@ -68,6 +70,7 @@ def load_lumina2_components(args, device=None, weight_dtype=torch.float32):
             torch_dtype=torch.float32,
             revision=getattr(args, "revision", None),
             variant=getattr(args, "variant", None),
+            low_cpu_mem_usage=True if device_map else False,
         )
 
     return noise_scheduler, tokenizer, text_encoder, vae, transformer
