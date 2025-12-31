@@ -339,7 +339,7 @@ class Lumina2Wrapper(nn.Module):
         pipeline.encode_prompt = self.encode_prompt
         
         pipeline.system_prompt = self.system_prompt
-
+        device_type = device.type if device else "cuda"
         generator = torch.Generator(device=device).manual_seed(seed) if seed else None
         with torch.amp.autocast(device_type=device_type, dtype=torch.bfloat16):
             images = pipeline(
