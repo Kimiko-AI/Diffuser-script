@@ -49,7 +49,7 @@ def load_lumina2_components(args, device=None, weight_dtype=torch.float32):
     # VAE is usually kept in float32 for stability, but we can respect weight_dtype if forced
     # The provided script keeps VAE in float32.
     vae = AutoencoderKL.from_pretrained(
-        args.pretrained_model_name_or_path,
+        args.vae_path,
         device_map=device_map,
         torch_dtype=torch.float32, 
         revision=getattr(args, "revision", None),
