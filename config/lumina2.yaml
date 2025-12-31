@@ -19,7 +19,7 @@ model:
 
   model_type: "lumina2"
   mixed_precision: "bf16" # Options: "no", "fp16", "bf16"
-  gradient_checkpointing: true
+  gradient_checkpointing: false
 
   # Lumina Specifics
   max_sequence_length: 512

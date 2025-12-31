@@ -26,6 +26,7 @@ class Lumina2Wrapper(nn.Module):
         
         # Unfreeze transformer for full fine-tuning
         self.transformer.requires_grad_(True)
+        self.transformer.train()
         if getattr(args, "gradient_checkpointing", False):
             self.transformer.enable_gradient_checkpointing()
 

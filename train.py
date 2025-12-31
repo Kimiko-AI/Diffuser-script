@@ -348,7 +348,7 @@ def main():
 
         # Logs
         if rank == 0:
-            current_lr = 0
+            current_lr = 0.0002
             logs = {"lr": current_lr, "grad_norm": grad_norm.item()}
             logs.update(accum_logs) # Add all accumulated losses
             
@@ -413,7 +413,7 @@ def main():
                     logger.error(f"Failed to save checkpoint: {e}")
 
         # Validate
-        if global_step % args.validation_steps == 0:
+        if global_step % args.validation_steps == 0 or global_step == 1:
             if rank == 0:
                 with torch.no_grad():
                     # We pass the wrapper. log_validation handles unwrapping now.
