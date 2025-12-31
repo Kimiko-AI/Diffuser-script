@@ -20,18 +20,17 @@ class Lumina2Wrapper(nn.Module):
         self.args = args
         self.caption_dropout_prob = getattr(args, "caption_dropout_prob", 0.0)
 
-        # Freeze frozen components
+        # Freeze components
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
         
-        # Unfreeze transformer for full fine-tuning
+        # Unfreeze transformer
         self.transformer.requires_grad_(True)
         self.transformer.train()
         if getattr(args, "gradient_checkpointing", False):
             self.transformer.enable_gradient_checkpointing()
 
-        # Helper pipeline for encoding text
-        # We initialize it with None for components we don't need immediately to save memory/time
+        # Helper pipeline
         self.text_encoding_pipeline = Lumina2Pipeline(
             transformer=self.transformer, 
             text_encoder=self.text_encoder,
@@ -52,7 +51,7 @@ class Lumina2Wrapper(nn.Module):
         return self._text_encoder[0]
         
     def get_sigmas(self, timesteps, n_dim=4, dtype=torch.float32, device=None):
-        # Lumina2 logic for sigmas from scheduler
+        # Get sigmas
         sigmas = self.noise_scheduler.sigmas.to(device=device, dtype=dtype)
         schedule_timesteps = self.noise_scheduler.timesteps.to(device)
         timesteps = timesteps.to(device)
@@ -98,7 +97,7 @@ class Lumina2Wrapper(nn.Module):
             text_input_ids, attention_mask=prompt_attention_mask, output_hidden_states=True
         )
         
-        # Adaptation: Layer-wise pooling
+        # Layer-wise pooling
         # Drop embedding layer
         hidden_states = encoder_outputs.hidden_states[1:]
 
@@ -222,7 +221,6 @@ class Lumina2Wrapper(nn.Module):
             max_sequence_length = getattr(self.args, "max_sequence_length", 256)
             system_prompt = getattr(self.args, "system_prompt", None)
 
-            # Use local encode_prompt
             prompt_embeds, prompt_attention_mask, _, _ = self.encode_prompt(
                 prompt=prompts_in,
                 do_classifier_free_guidance=False,
@@ -256,15 +254,6 @@ class Lumina2Wrapper(nn.Module):
         noise = torch.randn_like(latents)
 
         # Timestep sampling
-        # Use args directly if flat or nested dict if structured
-        # config.yaml structure: timestep_sampling: {weighting_scheme: ...}
-        # But args flattening in train.py keeps subdicts? No, I flattened it recursively.
-        # But for 'timestep_sampling' I said I'd flatten. 
-        # Let's check train.py again. 
-        # "timestep_sampling" key in args? 
-        # I added exception in flatten(): k != "timestep_sampling"
-        # So args.timestep_sampling should be a dict.
-        
         ts_config = getattr(self.args, "timestep_sampling", {})
         weighting_scheme = ts_config.get("weighting_scheme", "uniform")
         
@@ -278,17 +267,14 @@ class Lumina2Wrapper(nn.Module):
 
         indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
         # Ensure indices and timesteps are on the same device
-        # We clamp indices just in case, though u is usually [0, 1)
         indices = indices.clamp(0, self.noise_scheduler.config.num_train_timesteps - 1)
         
-        # Check if timesteps is present (some schedulers need set_timesteps called)
+        # Check if timesteps is present
         if hasattr(self.noise_scheduler, "timesteps") and self.noise_scheduler.timesteps is not None:
              sched_timesteps = self.noise_scheduler.timesteps.to(device)
              timesteps = sched_timesteps[indices]
         else:
-             # Fallback if timesteps is not populated (though error implies it was a CPU tensor)
-             # Usually FlowMatch scheduler has reversed 1000 -> 0 or 0 -> 1000
-             # Default to linspace if missing
+             # Fallback
              timesteps = torch.linspace(0, self.noise_scheduler.config.num_train_timesteps - 1, self.noise_scheduler.config.num_train_timesteps, device=device).flip(0)
              timesteps = timesteps[indices]
 
@@ -337,9 +323,7 @@ class Lumina2Wrapper(nn.Module):
         if device is None:
             device = next(self.transformer.parameters()).device
 
-        # Patch pipeline with our custom encoder methods
-        # To avoid patching the class globally or creating a new subclass dynamically, 
-        # we can just assign the methods to the instance.
+        # Patch pipeline
         pipeline = Lumina2Pipeline(
             transformer=self.transformer,
             vae=self.vae,
@@ -350,15 +334,10 @@ class Lumina2Wrapper(nn.Module):
         pipeline.to(device)
         pipeline.set_progress_bar_config(disable=True)
         
-        # Bind methods to the pipeline instance
-        # We simply assign the bound methods from the wrapper to the pipeline.
-        # This ensures 'self' inside these methods remains the wrapper instance,
-        # which holds the correct tokenizer, text_encoder, and configuration.
+        # Bind methods
         pipeline._get_gemma_prompt_embeds = self._get_gemma_prompt_embeds
         pipeline.encode_prompt = self.encode_prompt
         
-        # We also ensure the pipeline has access to system_prompt if it needs it 
-        # (though our wrapper.encode_prompt uses self.system_prompt from wrapper)
         pipeline.system_prompt = self.system_prompt
 
         generator = torch.Generator(device=device).manual_seed(seed) if seed else None
