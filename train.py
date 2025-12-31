@@ -111,17 +111,33 @@ def main():
         rank = int(os.environ["RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
         local_rank = int(os.environ["LOCAL_RANK"])
+        
+        torch.cuda.set_device(local_rank)
+        device = torch.device(f"cuda:{local_rank}")
 
         if not dist.is_initialized():
-            dist.init_process_group(backend="nccl", init_method="env://", timeout=timedelta(hours=2))
+            # In newer torch, we can specify device_id in init_process_group to avoid warnings
+            try:
+                dist.init_process_group(
+                    backend="nccl", 
+                    init_method="env://", 
+                    timeout=timedelta(hours=2),
+                    device_id=torch.device(f"cuda:{local_rank}")
+                )
+            except TypeError:
+                # Fallback for older torch versions
+                dist.init_process_group(
+                    backend="nccl", 
+                    init_method="env://", 
+                    timeout=timedelta(hours=2)
+                )
     else:
         rank = 0
         world_size = 1
         local_rank = 0
+        torch.cuda.set_device(local_rank)
+        device = torch.device(f"cuda:{local_rank}")
         print("Distributed environment not detected, running in single process mode.")
-
-    torch.cuda.set_device(local_rank)
-    device = torch.device(f"cuda:{local_rank}")
 
     # Setup logging only on main process
     if rank == 0:
@@ -212,13 +228,25 @@ def main():
 
     # === RESUME LOGIC ===
     global_step = 0
-    if args.resume_from_checkpoint:
-        path = args.resume_from_checkpoint
-        if path == "latest":
-            dirs = os.listdir(args.output_dir)
-            dirs = [d for d in dirs if d.startswith("checkpoint-")]
-            dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
-            path = os.path.join(args.output_dir, dirs[-1]) if len(dirs) > 0 else None
+    path = args.resume_from_checkpoint
+    
+    if path:
+        # Resolve 'latest' on rank 0
+        if rank == 0:
+            if path == "latest":
+                if os.path.exists(args.output_dir):
+                    dirs = os.listdir(args.output_dir)
+                    dirs = [d for d in dirs if d.startswith("checkpoint-")]
+                    dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
+                    path = os.path.join(args.output_dir, dirs[-1]) if len(dirs) > 0 else None
+                else:
+                    path = None
+        
+        # Broadcast resolved path to all ranks
+        if world_size > 1:
+            object_list = [path]
+            dist.broadcast_object_list(object_list, src=0)
+            path = object_list[0]
 
         if path and os.path.exists(path):
             if rank == 0:
@@ -364,7 +392,7 @@ def main():
 
         if global_step % args.checkpointing_steps == 0 or global_step % args.validation_steps == 0 or global_step == 1:
             if world_size > 1:
-                dist.barrier()
+                dist.barrier(device_ids=[local_rank])
 
         # Save
         if global_step % args.checkpointing_steps == 0:
@@ -425,7 +453,7 @@ def main():
                     )
 
             if world_size > 1:
-                dist.barrier()
+                dist.barrier(device_ids=[local_rank])
 
     if rank == 0:
         print("Training finished.")
