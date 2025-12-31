@@ -60,7 +60,7 @@ def _encode_prompt_lumina2_monkeypatch(
         prompt_mask = text_inputs.attention_mask.to(device_in)
 
         encoder_outputs = self.text_encoder(
-            text_input_ids, attention_mask=prompt_mask, output_hidden_states=True
+            text_input_ids, attention_mask=prompt_mask, output_hidden_states=True, use_cache=False
         )
         
         # Drop embedding layer
@@ -139,6 +139,12 @@ class Lumina2Wrapper(nn.Module):
 
         # Default sampling config if none provided
         self.timestep_sampling_config = timestep_sampling_config or {"weighting_scheme": "logit_normal"}
+        
+        # Ensure defaults for logit-normal parameters if scheme is logit_normal
+        if self.timestep_sampling_config.get("weighting_scheme") == "logit_normal":
+             self.timestep_sampling_config.setdefault("logit_mean", 0.0)
+             self.timestep_sampling_config.setdefault("logit_std", 1.0)
+             self.timestep_sampling_config.setdefault("mode_scale", 1.29)
 
         # Freeze frozen components
         self.vae.requires_grad_(False)
