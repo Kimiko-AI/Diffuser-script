@@ -77,7 +77,7 @@ class Lumina2Wrapper(nn.Module):
         text_inputs = self.tokenizer(
             prompt,
             padding="max_length",
-            max_length=max_sequence_length,
+            max_length=128,
             truncation=True,
             return_tensors="pt",
         )
@@ -133,7 +133,7 @@ class Lumina2Wrapper(nn.Module):
         prompt_attention_mask: Optional[torch.Tensor] = None,
         negative_prompt_attention_mask: Optional[torch.Tensor] = None,
         system_prompt: Optional[str] = None,
-        max_sequence_length: int = 256,
+        max_sequence_length: int = 128,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         if device is None:
             device = self.text_encoder.device
@@ -332,7 +332,7 @@ class Lumina2Wrapper(nn.Module):
             scheduler=self.noise_scheduler,
         )
         pipeline.to(device)
-        pipeline.set_progress_bar_config(disable=True)
+        pipeline.set_progress_bar_config(disable=False)
         
         # Bind methods
         pipeline._get_gemma_prompt_embeds = self._get_gemma_prompt_embeds
