@@ -9,28 +9,147 @@ from diffusers.training_utils import compute_density_for_timestep_sampling, comp
 
 logger = logging.getLogger(__name__)
 
+def _encode_prompt_lumina2_monkeypatch(
+    self,
+    prompt: Union[str, List[str]],
+    device: Optional[torch.device] = None,
+    do_classifier_free_guidance: bool = True,
+    negative_prompt: Union[str, List[str]] = None,
+    num_images_per_prompt: int = 1,
+    prompt_embeds: Optional[torch.Tensor] = None,
+    negative_prompt_embeds: Optional[torch.Tensor] = None,
+    prompt_attention_mask: Optional[torch.Tensor] = None,
+    negative_prompt_attention_mask: Optional[torch.Tensor] = None,
+    system_prompt: Optional[str] = None,
+    max_sequence_length: int = 256,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    
+    device = device or self._execution_device
+
+    # Default system prompt if not provided (Lumina2 specific)
+    if system_prompt is None:
+        system_prompt = getattr(self, "system_prompt", "You are an assistant designed to generate high-quality images.")
+
+    prompt = [prompt] if isinstance(prompt, str) else prompt
+    if prompt is not None:
+        batch_size = len(prompt)
+    else:
+        batch_size = prompt_embeds.shape[0]
+
+    # Apply system prompt formatting if prompts are raw
+    if prompt is not None:
+        prompt = [system_prompt + " <Prompt Start> " + p for p in prompt]
+
+    def _get_gemma_prompt_embeds(
+        prompt_in: Union[str, List[str]],
+        device_in: Optional[torch.device] = None,
+        max_len_in: int = 256,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        device_in = device_in or self.text_encoder.device
+        prompt_in = [prompt_in] if isinstance(prompt_in, str) else prompt_in
+        
+        text_inputs = self.tokenizer(
+            prompt_in,
+            padding="max_length",
+            max_length=max_len_in,
+            truncation=True,
+            return_tensors="pt",
+        )
+
+        text_input_ids = text_inputs.input_ids.to(device_in)
+        prompt_mask = text_inputs.attention_mask.to(device_in)
+
+        encoder_outputs = self.text_encoder(
+            text_input_ids, attention_mask=prompt_mask, output_hidden_states=True
+        )
+        
+        # Drop embedding layer
+        hidden_states = encoder_outputs.hidden_states[1:]
+
+        # Stack: (num_layers, batch, seq_len, hidden_size)
+        H = torch.stack(hidden_states, dim=0)
+        # L2 normalize across hidden_size dim
+        H_norm = torch.nn.functional.normalize(H, p=2, dim=-1)
+        # Result: (batch, seq_len, hidden_size)
+        emb = H_norm.mean(dim=0)
+
+        if self.text_encoder is not None:
+            dtype_enc = self.text_encoder.dtype
+        elif self.transformer is not None:
+            dtype_enc = self.transformer.dtype
+        else:
+            dtype_enc = None
+
+        emb = emb.to(dtype=dtype_enc, device=device_in)
+        return emb, prompt_mask
+
+    if prompt_embeds is None:
+        prompt_embeds, prompt_attention_mask = _get_gemma_prompt_embeds(
+            prompt_in=prompt,
+            device_in=device,
+            max_len_in=max_sequence_length,
+        )
+
+    batch_size, seq_len, _ = prompt_embeds.shape
+    # duplicate text embeddings and attention mask for each generation per prompt
+    prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
+    prompt_embeds = prompt_embeds.view(batch_size * num_images_per_prompt, seq_len, -1)
+    prompt_attention_mask = prompt_attention_mask.repeat(num_images_per_prompt, 1)
+    prompt_attention_mask = prompt_attention_mask.view(batch_size * num_images_per_prompt, -1)
+
+    # Get negative embeddings for classifier free guidance
+    if do_classifier_free_guidance and negative_prompt_embeds is None:
+        negative_prompt = negative_prompt if negative_prompt is not None else ""
+        negative_prompt = batch_size * [negative_prompt] if isinstance(negative_prompt, str) else negative_prompt
+
+        if prompt is not None and type(prompt) is not type(negative_prompt):
+             raise TypeError(f"Type mismatch: {type(negative_prompt)} != {type(prompt)}.")
+
+        negative_prompt_embeds, negative_prompt_attention_mask = _get_gemma_prompt_embeds(
+            prompt_in=negative_prompt,
+            device_in=device,
+            max_len_in=max_sequence_length,
+        )
+
+        batch_size, seq_len, _ = negative_prompt_embeds.shape
+        negative_prompt_embeds = negative_prompt_embeds.repeat(1, num_images_per_prompt, 1)
+        negative_prompt_embeds = negative_prompt_embeds.view(batch_size * num_images_per_prompt, seq_len, -1)
+        negative_prompt_attention_mask = negative_prompt_attention_mask.repeat(num_images_per_prompt, 1)
+        negative_prompt_attention_mask = negative_prompt_attention_mask.view(batch_size * num_images_per_prompt, -1)
+
+    return prompt_embeds, prompt_attention_mask, negative_prompt_embeds, negative_prompt_attention_mask
+
+# Monkeypatch Lumina2Pipeline
+Lumina2Pipeline.encode_prompt = _encode_prompt_lumina2_monkeypatch
+
+
 class Lumina2Wrapper(nn.Module):
-    def __init__(self, transformer, vae, text_encoder, tokenizer, noise_scheduler, args=None):
+    def __init__(self, transformer, vae, text_encoder, tokenizer, noise_scheduler, timestep_sampling_config=None,
+                 caption_dropout_prob=0.0, afm_lambda=0.0, consistency_lambda=1.0, args=None):
         super().__init__()
         self.transformer = transformer
         self._vae = [vae]
         self._text_encoder = [text_encoder]
         self.tokenizer = tokenizer
         self.noise_scheduler = noise_scheduler
+        self.caption_dropout_prob = caption_dropout_prob
+        self.afm_lambda = afm_lambda
+        self.consistency_lambda = consistency_lambda
         self.args = args
-        self.caption_dropout_prob = getattr(args, "caption_dropout_prob", 0.0)
 
-        # Freeze components
+        # Default sampling config if none provided
+        self.timestep_sampling_config = timestep_sampling_config or {"weighting_scheme": "logit_normal"}
+
+        # Freeze frozen components
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
         
-        # Unfreeze transformer
-        self.transformer.requires_grad_(True)
+        # Ensure transformer is in train mode
         self.transformer.train()
-        if getattr(args, "gradient_checkpointing", False):
+        if args and getattr(args, "gradient_checkpointing", False):
             self.transformer.enable_gradient_checkpointing()
 
-        # Helper pipeline
+        # Helper pipeline for encoding text during training
         self.text_encoding_pipeline = Lumina2Pipeline(
             transformer=self.transformer, 
             text_encoder=self.text_encoder,
@@ -39,8 +158,8 @@ class Lumina2Wrapper(nn.Module):
             vae=self.vae
         )
         
-        # Set system prompt default
-        self.system_prompt = getattr(args, "system_prompt", "You are an assistant designed to generate high-quality images.")
+        # Set system prompt default on the pipeline instance
+        self.text_encoding_pipeline.system_prompt = getattr(args, "system_prompt", "You are an assistant designed to generate high-quality images.") if args else "You are an assistant designed to generate high-quality images."
 
     @property
     def vae(self):
@@ -49,9 +168,17 @@ class Lumina2Wrapper(nn.Module):
     @property
     def text_encoder(self):
         return self._text_encoder[0]
-        
+
+    def load_state_dict(self, state_dict, strict=True):
+        new_state_dict = {
+            k: v for k, v in state_dict.items()
+            if not k.startswith("vae.") and not k.startswith("text_encoder.") and
+               not k.startswith("_vae.") and not k.startswith("_text_encoder.")
+        }
+        return super().load_state_dict(new_state_dict, strict=strict)
+
     def get_sigmas(self, timesteps, n_dim=4, dtype=torch.float32, device=None):
-        # Get sigmas
+        # Keep this helper as it's specific to Flow Matching sigma retrieval
         sigmas = self.noise_scheduler.sigmas.to(device=device, dtype=dtype)
         schedule_timesteps = self.noise_scheduler.timesteps.to(device)
         timesteps = timesteps.to(device)
@@ -63,146 +190,20 @@ class Lumina2Wrapper(nn.Module):
             sigma = sigma.unsqueeze(-1)
         return sigma
 
-    # --- Custom Text Encoding Logic ---
-
-    def _get_gemma_prompt_embeds(
-        self,
-        prompt: Union[str, List[str]],
-        device: Optional[torch.device] = None,
-        max_sequence_length: int = 256,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        device = device or self.text_encoder.device
-        prompt = [prompt] if isinstance(prompt, str) else prompt
-        
-        text_inputs = self.tokenizer(
-            prompt,
-            padding="max_length",
-            max_length=max_sequence_length,
-            truncation=True,
-            return_tensors="pt",
-        )
-
-        text_input_ids = text_inputs.input_ids.to(device)
-
-        prompt_attention_mask = text_inputs.attention_mask.to(device)
-        encoder_outputs = self.text_encoder(
-            text_input_ids, attention_mask=prompt_attention_mask, output_hidden_states=True
-        )
-        
-        # Layer-wise pooling
-        # Drop embedding layer
-        hidden_states = encoder_outputs.hidden_states[1:]
-
-        # Stack: (num_layers, batch, seq_len, hidden_size)
-        H = torch.stack(hidden_states, dim=0)
-        # L2 normalize across hidden_size dim
-        H_norm = torch.nn.functional.normalize(H, p=2, dim=-1)
-        # Result: (batch, seq_len, hidden_size)
-        prompt_embeds = H_norm.mean(dim=0)
-
-        if self.text_encoder is not None:
-            dtype = self.text_encoder.dtype
-        elif self.transformer is not None:
-            dtype = self.transformer.dtype
-        else:
-            dtype = None
-
-        prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
-
-        _, seq_len, _ = prompt_embeds.shape
-
-        return prompt_embeds, prompt_attention_mask
-
-    def encode_prompt(
-        self,
-        prompt: Union[str, List[str]],
-        do_classifier_free_guidance: bool = True,
-        negative_prompt: Union[str, List[str]] = None,
-        num_images_per_prompt: int = 1,
-        device: Optional[torch.device] = None,
-        prompt_embeds: Optional[torch.Tensor] = None,
-        negative_prompt_embeds: Optional[torch.Tensor] = None,
-        prompt_attention_mask: Optional[torch.Tensor] = None,
-        negative_prompt_attention_mask: Optional[torch.Tensor] = None,
-        system_prompt: Optional[str] = None,
-        max_sequence_length: int = 128,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        if device is None:
-            device = self.text_encoder.device
-
-        prompt = [prompt] if isinstance(prompt, str) else prompt
-        if prompt is not None:
-            batch_size = len(prompt)
-        else:
-            batch_size = prompt_embeds.shape[0]
-
-        if system_prompt is None:
-            system_prompt = self.system_prompt
-        
-        # Apply system prompt formatting if prompts are raw
-        if prompt is not None:
-            prompt = [system_prompt + " <Prompt Start> " + p for p in prompt]
-
-        if prompt_embeds is None:
-            prompt_embeds, prompt_attention_mask = self._get_gemma_prompt_embeds(
-                prompt=prompt,
-                device=device,
-                max_sequence_length=max_sequence_length,
-            )
-
-        batch_size, seq_len, _ = prompt_embeds.shape
-        # duplicate text embeddings and attention mask for each generation per prompt
-        prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
-        prompt_embeds = prompt_embeds.view(batch_size * num_images_per_prompt, seq_len, -1)
-        prompt_attention_mask = prompt_attention_mask.repeat(num_images_per_prompt, 1)
-        prompt_attention_mask = prompt_attention_mask.view(batch_size * num_images_per_prompt, -1)
-
-        # Get negative embeddings for classifier free guidance
-        if do_classifier_free_guidance and negative_prompt_embeds is None:
-            negative_prompt = negative_prompt if negative_prompt is not None else ""
-
-            # Normalize str to list
-            negative_prompt = batch_size * [negative_prompt] if isinstance(negative_prompt, str) else negative_prompt
-
-            if prompt is not None and type(prompt) is not type(negative_prompt):
-                raise TypeError(
-                    f"`negative_prompt` should be the same type to `prompt`, but got {type(negative_prompt)} !="
-                    f" {type(prompt)}."
-                )
-            elif isinstance(negative_prompt, str):
-                negative_prompt = [negative_prompt]
-            elif batch_size != len(negative_prompt):
-                raise ValueError(
-                    f"`negative_prompt`: {negative_prompt} has batch size {len(negative_prompt)}, but `prompt`:"
-                    f" {prompt} has batch size {batch_size}. Please make sure that passed `negative_prompt` matches"
-                    " the batch size of `prompt`."
-                )
-            negative_prompt_embeds, negative_prompt_attention_mask = self._get_gemma_prompt_embeds(
-                prompt=negative_prompt,
-                device=device,
-                max_sequence_length=max_sequence_length,
-            )
-
-            batch_size, seq_len, _ = negative_prompt_embeds.shape
-            # duplicate text embeddings and attention mask for each generation per prompt
-            negative_prompt_embeds = negative_prompt_embeds.repeat(1, num_images_per_prompt, 1)
-            negative_prompt_embeds = negative_prompt_embeds.view(batch_size * num_images_per_prompt, seq_len, -1)
-            negative_prompt_attention_mask = negative_prompt_attention_mask.repeat(num_images_per_prompt, 1)
-            negative_prompt_attention_mask = negative_prompt_attention_mask.view(
-                batch_size * num_images_per_prompt, -1
-            )
-
-        return prompt_embeds, prompt_attention_mask, negative_prompt_embeds, negative_prompt_attention_mask
-
-
     def forward(
             self,
             pixel_values,
             prompts,
             device,
+            paraphrased_prompts: Optional[List[str]] = None,
             weight_dtype=torch.float32,
+            consistency_lambda: float = None,
             **kwargs
     ):
+        # Use instance default if not provided
+        if consistency_lambda is None:
+            consistency_lambda = self.consistency_lambda
+
         # --- 1. Encode Text ---
         with torch.no_grad():
             if self.training and self.caption_dropout_prob > 0:
@@ -210,19 +211,31 @@ class Lumina2Wrapper(nn.Module):
             else:
                 prompts_in = prompts
 
-            max_sequence_length = getattr(self.args, "max_sequence_length", 256)
-            system_prompt = getattr(self.args, "system_prompt", None)
-
-            prompt_embeds, prompt_attention_mask, _, _ = self.encode_prompt(
+            max_sequence_length = getattr(self.args, "max_sequence_length", 256) if self.args else 256
+            
+            # Using the monkeypatched pipeline method
+            prompt_embeds, prompt_attention_mask, _, _ = self.text_encoding_pipeline.encode_prompt(
                 prompt=prompts_in,
                 do_classifier_free_guidance=False,
                 device=device,
-                max_sequence_length=max_sequence_length,
-                system_prompt=system_prompt
+                max_sequence_length=max_sequence_length
             )
 
             prompt_embeds = prompt_embeds.to(dtype=weight_dtype)
             prompt_attention_mask = prompt_attention_mask.to(device=device)
+
+            # --- Encode Paraphrased Text (Positive Pair) ---
+            prompt_embeds_pos = None
+            prompt_attention_mask_pos = None
+            if paraphrased_prompts is not None:
+                prompt_embeds_pos, prompt_attention_mask_pos, _, _ = self.text_encoding_pipeline.encode_prompt(
+                    prompt=paraphrased_prompts,
+                    do_classifier_free_guidance=False,
+                    device=device,
+                    max_sequence_length=max_sequence_length
+                )
+                prompt_embeds_pos = prompt_embeds_pos.to(dtype=weight_dtype)
+                prompt_attention_mask_pos = prompt_attention_mask_pos.to(device=device)
 
         # --- 2. Encode Images (VAE) ---
         with torch.no_grad():
@@ -246,19 +259,13 @@ class Lumina2Wrapper(nn.Module):
         noise = torch.randn_like(latents)
 
         # Timestep sampling
-        ts_config = getattr(self.args, "timestep_sampling", {})
-        weighting_scheme = ts_config.get("weighting_scheme", "uniform")
-        
         u = compute_density_for_timestep_sampling(
-            weighting_scheme=weighting_scheme,
             batch_size=bsz,
-            logit_mean=ts_config.get("logit_mean", 0.0),
-            logit_std=ts_config.get("logit_std", 1.0),
-            mode_scale=ts_config.get("mode_scale", 1.29),
+            **self.timestep_sampling_config
         ).to(device)
 
+        # Map u to timesteps
         indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
-        # Ensure indices and timesteps are on the same device
         indices = indices.clamp(0, self.noise_scheduler.config.num_train_timesteps - 1)
         
         # Check if timesteps is present
@@ -287,15 +294,45 @@ class Lumina2Wrapper(nn.Module):
         )[0]
 
         # --- 5. Calculate Loss ---
+        # Using weighting from config if possible, but ZImage uses hardcoded logic or fm. 
+        # Lumina2 generally uses uniform or logit-normal with specific weighting.
+        # We stick to compute_loss_weighting_for_sd3 as it was there.
+        weighting_scheme = self.timestep_sampling_config.get("weighting_scheme", "logit_normal")
         weighting = compute_loss_weighting_for_sd3(weighting_scheme=weighting_scheme, sigmas=sigmas)
         
         target = latents - noise
 
-        loss = torch.mean(
+        loss_fm = torch.mean(
             (weighting.float() * (model_pred.float() - target.float()) ** 2).reshape(target.shape[0], -1),
             1,
         )
-        loss = loss.mean()
+        loss = loss_fm.mean()
+
+        # --- 6. Positive Pair Consistency ---
+        if prompt_embeds_pos is not None:
+             model_pred_pos = self.transformer(
+                hidden_states=noisy_latents,
+                encoder_hidden_states=prompt_embeds_pos,
+                encoder_attention_mask=prompt_attention_mask_pos,
+                timestep=timesteps_norm,
+                return_dict=False,
+            )[0]
+             
+             loss_consistency = F.mse_loss(
+                 model_pred.detach().float(),
+                 model_pred_pos.float()
+             )
+             loss = loss + (consistency_lambda * loss_consistency)
+
+        # --- 7. Negative Pair Contrastive (AFM) ---
+        if self.afm_lambda > 0 and bsz > 1:
+            neg_latents = torch.roll(latents, shifts=1, dims=0)
+            neg_noise = torch.roll(noise, shifts=1, dims=0)
+            neg_target = (neg_latents - neg_noise)
+
+            # We use simple MSE for contrastive loss as in ZImage
+            loss_contrastive = F.mse_loss(model_pred.detach().float(), neg_target.float())
+            loss = loss - (self.afm_lambda * loss_contrastive)
 
         return loss
 
@@ -312,10 +349,12 @@ class Lumina2Wrapper(nn.Module):
             width: int = 256,
             **kwargs
     ) -> List[Any]:
+        
         if device is None:
             device = next(self.transformer.parameters()).device
-
-        # Patch pipeline
+        was_training = self.transformer.training
+        self.transformer.eval()
+        # Reuse internal pipeline if possible, or create new one like ZImage
         pipeline = Lumina2Pipeline(
             transformer=self.transformer,
             vae=self.vae,
@@ -326,13 +365,12 @@ class Lumina2Wrapper(nn.Module):
         pipeline.to(device)
         pipeline.set_progress_bar_config(disable=False)
         
-        # Bind methods
-        pipeline._get_gemma_prompt_embeds = self._get_gemma_prompt_embeds
-        pipeline.encode_prompt = self.encode_prompt
-        
-        pipeline.system_prompt = self.system_prompt
+        # System prompt is handled by the monkeypatched encode_prompt via instance attribute or default
+        pipeline.system_prompt = getattr(self.args, "system_prompt", "You are an assistant designed to generate high-quality images.") if self.args else "You are an assistant designed to generate high-quality images."
+
         device_type = device.type if device else "cuda"
         generator = torch.Generator(device=device).manual_seed(seed) if seed else None
+        
         with torch.amp.autocast(device_type=device_type, dtype=torch.bfloat16):
             images = pipeline(
                 prompt=prompt,
@@ -342,7 +380,7 @@ class Lumina2Wrapper(nn.Module):
                 num_inference_steps=num_inference_steps,
                 guidance_scale=guidance_scale,
                 num_images_per_prompt=num_images,
-                system_prompt=self.system_prompt
             ).images
-
+        if was_training:
+            self.transformer.train()
         return images, prompt
