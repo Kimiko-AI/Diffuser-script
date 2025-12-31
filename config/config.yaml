@@ -8,7 +8,15 @@ general:
 # Model Configuration
 model:
   pretrained_model_name_or_path: "Tongyi-MAI/Z-Image-Turbo"
+  transformer_subfolder: "transformer"
+  scheduler_subfolder: "scheduler"
+
   text_encoder_path: "Tongyi-MAI/Z-Image-Turbo"
+  text_encoder_subfolder: "text_encoder"
+  tokenizer_subfolder: "tokenizer"
+
+  vae_path: "REPA-E/e2e-flux-vae"
+  vae_subfolder: null
   vae_path: "REPA-E/e2e-flux-vae"
   transformer_class_path: "diffusers.ZImageTransformer2DModel"
   model_type: "zimage" # Options: "zimage", "sana", "sr_dit"

@@ -185,3 +185,4 @@ class SRDiTWrapper(BaseWrapper):
         images = pipeline(prompt=prompt, num_inference_steps=num_inference_steps, guidance_scale=guidance_scale, generator=generator).images
         if was_training: self.transformer.train()
         return images, prompt
+

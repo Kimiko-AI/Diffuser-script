@@ -30,8 +30,12 @@ Trained on {base_model}.
 
 def log_validation(model_wrapper, args, global_step, device):
     validation_prompts = args.validation_prompt
-    if isinstance(validation_prompts, str):
+    if validation_prompts is None:
+        validation_prompts = []
+    elif isinstance(validation_prompts, str):
         validation_prompts = [validation_prompts]
+    else:
+        validation_prompts = list(validation_prompts)
 
     logger.info(f"Running validation... Prompts: {validation_prompts}")
 
@@ -43,21 +47,38 @@ def log_validation(model_wrapper, args, global_step, device):
 
     all_images = []
 
-    # Generate all images in a single batch
-    # This assumes generate() can handle a list of prompts and returns a list of images (one per prompt)
-    images, validation_prompts = unwrapped_wrapper.generate(
-        prompt=validation_prompts,
+    # 1. Conditional Generation (User prompts)
+    if validation_prompts:
+        images_cond, _ = unwrapped_wrapper.generate(
+            prompt=validation_prompts,
+            num_inference_steps=getattr(args, "validation_num_inference_steps", 20),
+            guidance_scale=getattr(args, "validation_guidance_scale", 4.0),
+            num_images=1,
+            seed=args.seed,
+            device=device
+        )
+        for i, img in enumerate(images_cond):
+            all_images.append((validation_prompts[i], img))
+
+    # 2. Unconditional Generation (4 random samples, scale=1.0)
+    # We use a distinct seed offset or just rely on the generator state if seed is None
+    # If args.seed is set, we might get the same noise as the first batch if we don't offset.
+    # But usually generate() creates a new generator or handles state. 
+    # Let's use args.seed + 1 for unconditional to ensure variety if seed is fixed.
+    uncond_seed = args.seed + 1 if args.seed is not None else None
+    
+    uncond_prompts = [""] * 4
+    images_uncond, _ = unwrapped_wrapper.generate(
+        prompt=uncond_prompts,
         num_inference_steps=getattr(args, "validation_num_inference_steps", 20),
-        guidance_scale=getattr(args, "validation_guidance_scale", 4.0),
-        num_images=1,  # One image per prompt in the list
-        seed=args.seed,
+        guidance_scale=1.0,  # Force CFG off
+        num_images=1,
+        seed=uncond_seed,
         device=device
     )
 
-    # Collect for consolidated logging
-    for i, img in enumerate(images):
-        prompt = validation_prompts[i]
-        all_images.append((prompt, img))
+    for i, img in enumerate(images_uncond):
+        all_images.append((f"Unconditional_{i}", img))
 
     # Consolidated WandB logging
     if is_wandb_available() and wandb.run is not None:
@@ -70,8 +91,5 @@ def log_validation(model_wrapper, args, global_step, device):
             },
             step=global_step
         )
-
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
 
     return [img for _, img in all_images]

@@ -11,6 +11,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import gc
 import logging
 import math
+from datetime import timedelta
 from tqdm.auto import tqdm
 from diffusers.optimization import get_scheduler
 from trainer.data import get_dataloader
@@ -111,7 +112,7 @@ def main():
         local_rank = int(os.environ["LOCAL_RANK"])
 
         if not dist.is_initialized():
-            dist.init_process_group(backend="nccl", init_method="env://")
+            dist.init_process_group(backend="nccl", init_method="env://", timeout=timedelta(hours=2))
     else:
         rank = 0
         world_size = 1

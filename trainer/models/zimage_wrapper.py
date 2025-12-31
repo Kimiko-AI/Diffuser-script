@@ -187,7 +187,7 @@ class ZImageWrapper(nn.Module):
         model_pred = self.transformer(
             noisy_latents_input,
             u.flatten(),
-            [p.to(dtype=weight_dtype) for p in prompt_embeds],
+            prompt_embeds,
             return_dict=False
         )[0]
         model_pred = torch.stack(model_pred, dim=0).squeeze(2)
@@ -204,7 +204,7 @@ class ZImageWrapper(nn.Module):
             model_pred_pos = self.transformer(
                 noisy_latents_input,  # Same noisy input
                 u.flatten(),  # Same timestep
-                [p.to(dtype=weight_dtype) for p in prompt_embeds_pos],  # Different (paraphrased) text
+                prompt_embeds_pos,  # Different (paraphrased) text
                 return_dict=False
             )[0]
             model_pred_pos = torch.stack(model_pred_pos, dim=0).squeeze(2)
@@ -263,12 +263,15 @@ class ZImageWrapper(nn.Module):
         if isinstance(prompt, str):
             prompt = [prompt] * num_images
 
-        images = pipeline(
-            prompt=prompt,
-            generator=generator,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=guidance_scale
-        ).images
+        # Use bf16 autocast by default for validation
+        device_type = device.type if device else "cuda"
+        with torch.amp.autocast(device_type=device_type, dtype=torch.bfloat16):
+            images = pipeline(
+                prompt=prompt,
+                generator=generator,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale
+            ).images
 
         # Restore training state
         if was_training:
