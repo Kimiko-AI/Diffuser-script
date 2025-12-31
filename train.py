@@ -20,6 +20,7 @@ from trainer.utils import log_validation, save_model_card
 from trainer.models.zimage_wrapper import ZImageWrapper
 from trainer.models.sana_wrapper import SanaWrapper
 from contextlib import nullcontext
+from pytorch_optimizer.optimizer import ScheduleFreeAdamW
 
 # WandB check
 try:
@@ -165,6 +166,7 @@ def main():
         "text_encoder": text_encoder,
         "tokenizer": tokenizer,
         "noise_scheduler": noise_scheduler,
+        "args": args
     }
     
     # Add model specific args if needed
@@ -189,7 +191,7 @@ def main():
         model_wrapper = DDP(model_wrapper, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
 
     # Optimizer
-    optimizer = torch.optim.AdamW(
+    optimizer = ScheduleFreeAdamW(
         model_wrapper.parameters(), lr=args.learning_rate, weight_decay=1e-2
     )
 
@@ -198,12 +200,12 @@ def main():
     dataloader = get_dataloader(args)
 
     # Scheduler
-    lr_scheduler = get_scheduler(
-        getattr(args, "lr_scheduler_type", "constant"),
-        optimizer=optimizer,
-        num_warmup_steps=args.lr_warmup_steps,
-        num_training_steps=args.max_train_steps
-    )
+    #lr_scheduler = get_scheduler(
+    #    getattr(args, "lr_scheduler_type", "constant"),
+    #    optimizer=optimizer,
+    #    num_warmup_steps=args.lr_warmup_steps,
+    #    num_training_steps=args.max_train_steps
+    #)
 
     # Scaler for FP16
     scaler = torch.cuda.amp.GradScaler(enabled=(args.mixed_precision == "fp16"))
@@ -346,7 +348,7 @@ def main():
 
         # Logs
         if rank == 0:
-            current_lr = lr_scheduler.get_last_lr()[0]
+            current_lr = 0
             logs = {"lr": current_lr, "grad_norm": grad_norm.item()}
             logs.update(accum_logs) # Add all accumulated losses
             
@@ -355,7 +357,7 @@ def main():
 
             progress_bar.set_postfix(**logs)
 
-        lr_scheduler.step()
+        #lr_scheduler.step()
 
         # === VALIDATION & SAVING ===
         # We should sync before saving/validating
