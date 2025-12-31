@@ -1,0 +1,44 @@
+# Lumina 2 Training Configuration
+model_type: lumina2
+pretrained_model_name_or_path: "Alpha-VLLM/Lumina-Image-2.0" # Example placeholder
+output_dir: "output/lumina2_lora"
+mixed_precision: "bf16"
+seed: 42
+
+# Training
+learning_rate: 1e-4
+train_batch_size: 1
+max_train_steps: 1000
+gradient_accumulation_steps: 4
+checkpointing_steps: 500
+validation_steps: 500
+max_grad_norm: 1.0
+gradient_checkpointing: true
+
+# Data
+# Use instance_data_dir or dataset_name as per your WebDataset setup or custom loader integration
+# For WebDataset:
+data_url: "path/to/shards/{0000..0001}.tar" 
+resolution: 1024 # Lumina 2 usually 1024
+
+# LoRA Specifics
+lora_rank: 16
+lora_alpha: 16
+lora_dropout: 0.1
+lora_target_modules: "to_k,to_q,to_v,to_out.0"
+
+# Lumina Specifics
+max_sequence_length: 256
+system_prompt: "You are an assistant designed to generate high-quality images."
+caption_dropout_prob: 0.1
+
+# Timestep Sampling
+weighting_scheme: "logit_normal"
+logit_mean: 0.0
+logit_std: 1.0
+mode_scale: 1.29
+
+# Validation
+validation_prompt: "A photo of a cute dog."
+num_validation_images: 4
+report_to: "tensorboard"
