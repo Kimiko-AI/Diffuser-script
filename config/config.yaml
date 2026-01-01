@@ -19,7 +19,7 @@ model:
   vae_subfolder: null
   vae_path: "REPA-E/e2e-flux-vae"
   transformer_class_path: "diffusers.ZImageTransformer2DModel"
-  model_type: "zimage" # Options: "zimage", "sana", "sr_dit"
+  model_type: "zimage" # Options: "zimage", "sana", "decodit"
   mixed_precision: "bf16" # Options: "no", "fp16", "bf16"
   gradient_checkpointing: true
 

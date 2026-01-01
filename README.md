@@ -1,6 +1,6 @@
 # Diffuser-script
 
-A flexible training framework for Diffusion Transformers (Z-Image, Sana, SR-DiT).
+A flexible training framework for Diffusion Transformers (Z-Image, Sana, DecoDiT).
 
 ## Quick Start
 
@@ -10,7 +10,7 @@ A flexible training framework for Diffusion Transformers (Z-Image, Sana, SR-DiT)
    ```
 
 2. **Configure:**
-   Edit `config/config.yaml` or `config/sr_dit_xl.yaml`. Set `data_url` to your WebDataset shards.
+   Edit `config/config.yaml` or `config/decodit_xl.yaml`. Set `data_url` to your WebDataset shards.
 
 3. **Train:**
    ```bash
@@ -19,7 +19,7 @@ A flexible training framework for Diffusion Transformers (Z-Image, Sana, SR-DiT)
 
 ## Features
 
-- **Architectures:** Support for Z-Image, Sana, and SR-DiT.
+- **Architectures:** Support for Z-Image, Sana, and DecoDiT.
 - **Data Loading:** WebDataset with dynamic bucketing or "Fast Mode" random crops.
-- **SR-DiT:** Coordinate-aware training with (x, y, w, h) conditioning.
+- **DecoDiT:** Pixel-space coordinate-aware training with (x, y, w, h) conditioning.
 - **Optimization:** Mixed precision (bf16/fp16) and gradient norm logging.

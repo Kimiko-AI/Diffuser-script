@@ -9,9 +9,9 @@ def get_dataloader(args, accelerator=None):
     model_type = getattr(args, "model_type", "zimage")
     use_fast_mode = getattr(args, "fast_mode", False)
     
-    # Default to fast mode for sr_dit unless explicitly disabled (if someone were to add a disable flag)
+    # Default to fast mode for decodit unless explicitly disabled (if someone were to add a disable flag)
     # or just use the fast_mode flag which defaults to False for others.
-    if model_type == "sr_dit" and not getattr(args, "disable_fast_mode", False):
+    if model_type == "decodit" and not getattr(args, "disable_fast_mode", False):
         use_fast_mode = True
         
     if use_fast_mode:

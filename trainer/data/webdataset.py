@@ -247,8 +247,8 @@ def bucket_batcher(data_stream, batch_size=1, bucket_sizes=None, bucket_ratios=N
             continue
 
 
-# --- 3. SR-DiT Batcher (Random Resized Crop with Coords) ---
-def sr_dit_batcher(data_stream, batch_size=1, resolution=256):
+# --- 3. DecoDiT Batcher (Random Resized Crop with Coords) ---
+def decodit_batcher(data_stream, batch_size=1, resolution=256):
     to_tensor = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize([0.5], [0.5])
@@ -385,13 +385,13 @@ def get_fast_wds_loader(url_pattern, batch_size, num_workers=4, is_train=True, r
     dataset = dataset.decode("pil", handler=wds.warn_and_continue)
     dataset = dataset.map(transform_sample, handler=wds.warn_and_continue)
 
-    # Use sr_dit_batcher which does random resized crop and returns coords
+    # Use decodit_batcher which does random resized crop and returns coords
     # Handle list resolution if passed
     if isinstance(resolution, (list, tuple)):
         resolution = resolution[0]
         
     dataset = dataset.compose(
-        partial(sr_dit_batcher, batch_size=batch_size, resolution=resolution)
+        partial(decodit_batcher, batch_size=batch_size, resolution=resolution)
     )
 
     loader = wds.WebLoader(

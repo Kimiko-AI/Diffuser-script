@@ -53,7 +53,8 @@ def load_zimage_components(args, device=None, weight_dtype=torch.float32):
         torch_dtype=torch.float32, # Usually kept in fp32
         low_cpu_mem_usage=True if device_map else False
     )
-
+    vae.config.shift_factor = -0.2799
+    vae.config.scaling_factor = 0.4470
     # Determine Transformer Class
     transformer_class_path = getattr(args, "transformer_class_path", "diffusers.ZImageTransformer2DModel")
     TransformerClass = get_class_from_string(transformer_class_path)
