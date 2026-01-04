@@ -28,7 +28,7 @@ training:
   max_train_steps: 1000000
   train_batch_size: 64
   learning_rate: 0.0002
-  lr_warmup_steps: 100
+  lr_warmup_steps: 1000
   lr_scheduler_type: "cosine" # Options: "linear", "cosine", "constant"
   gradient_accumulation_steps: 1
   max_grad_norm: 1.0
@@ -55,7 +55,7 @@ training:
   # Validation / Visualization
   validation_steps: 500
   validation_num_inference_steps: 50
-  validation_guidance_scale: 4.0
+  validation_guidance_scale: 1
   validation_prompt:
     - "general, shana, 1girl >:) black_thighhighs bow closed_mouth grey_bow grey_sailor_collar grey_skirt hair_between_eyes holding holding_sword holding_weapon katana long_hair looking_at_viewer puffy_short_sleeves puffy_sleeves red_eyes red_hair sailor_collar school_uniform serafuku shirt short_sleeves skirt smile solo standing sword thighhighs v-shaped_eyebrows very_long_hair weapon white_background white_shirt"
     - "general, sakuraba_ema, 1girl belt beret black_background black_belt black_dress black_hat bug butterfly butterfly_on_hand cherry_blossoms cowboy_shot dress empty_eyes flower hair_flower hair_ornament hand_up hat long_sleeves looking_at_viewer multicolored_hair neck_ribbon o-ring o-ring_thigh_strap parted_lips pink_eyes pink_hair red_butterfly ribbon shirt short_hair shorts skeletal_wings solo standing thigh_strap white_flower white_hair white_ribbon white_shirt white_shorts wings witch_(manosaba) x_hair_ornament"

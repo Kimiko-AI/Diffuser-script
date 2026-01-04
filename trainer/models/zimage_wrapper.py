@@ -152,7 +152,7 @@ class ZImageWrapper(nn.Module):
                 prompts_in = prompts
 
             prompt_embeds, _ = self.text_encoding_pipeline.encode_prompt(
-                prompts_in, max_sequence_length=64, device=device, do_classifier_free_guidance=False
+                prompts_in, max_sequence_length=128, device=device, do_classifier_free_guidance=False
             )
 
 
@@ -161,7 +161,7 @@ class ZImageWrapper(nn.Module):
             if paraphrased_prompts is not None:
                 # Usually we don't apply dropout to the positive pair consistency check
                 prompt_embeds_pos, _ = self.text_encoding_pipeline.encode_prompt(
-                    paraphrased_prompts, max_sequence_length=64, device=device, do_classifier_free_guidance=False
+                    paraphrased_prompts, max_sequence_length=128, device=device, do_classifier_free_guidance=False
                 )
 
         # --- 2. Encode Images (VAE) ---
@@ -194,7 +194,7 @@ class ZImageWrapper(nn.Module):
 
         # --- 5. Calculate Standard Losses ---
         target = latents - noise
-        loss_fm = F.mse_loss(model_pred.float(), target.float())
+        loss_fm = F.mse_loss(model_pred.float(), target.float()) + F.l1_loss(model_pred.float(), target.float())
 
         loss = loss_fm
 
