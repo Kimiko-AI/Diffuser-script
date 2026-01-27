@@ -49,31 +49,22 @@ def log_validation(model_wrapper, args, global_step, device):
 
     # 1. Conditional Generation (User prompts)
     if validation_prompts:
-        images_cond, _ = unwrapped_wrapper.generate(
-            prompt=validation_prompts,
-            num_inference_steps=getattr(args, "validation_num_inference_steps", 20),
-            guidance_scale=getattr(args, "validation_guidance_scale", 4.0),
-            num_images=1,
-            seed=args.seed,
-            device=device
-        )
+        with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=True):
+
+            images_cond, _ = unwrapped_wrapper.generate(
+                prompt=validation_prompts,
+                num_inference_steps=getattr(args, "validation_num_inference_steps", 20),
+                guidance_scale=getattr(args, "validation_guidance_scale", 4.0),
+                num_images=1,
+                seed=args.seed,
+                device=device
+            )
         for i, img in enumerate(images_cond):
             all_images.append((validation_prompts[i], img))
 
     uncond_seed = args.seed + 1 if args.seed is not None else None
     
-    uncond_prompts = [""] * 4
-    images_uncond, _ = unwrapped_wrapper.generate(
-        prompt=uncond_prompts,
-        num_inference_steps=getattr(args, "validation_num_inference_steps", 20),
-        guidance_scale=1.0,  # Force CFG off
-        num_images=1,
-        seed=uncond_seed,
-        device=device
-    )
 
-    for i, img in enumerate(images_uncond):
-        all_images.append((f"Unconditional_{i}", img))
 
     # Consolidated WandB logging
     if is_wandb_available() and wandb.run is not None:

@@ -4,7 +4,7 @@ import torchvision.transforms as transforms
 from PIL import Image
 import numpy as np
 from functools import partial
-
+import json
 
 def generate_buckets(base_width, base_height, step_size=32):
     # Generate bucket sizes based on the formula (BASE_WIDTH - STEP_SIZE * n, BASE_HEIGHT + STEP_SIZE * n)
@@ -55,6 +55,9 @@ def transform_sample(sample):
     # Assuming 'json' or 'txt' or 'caption'
     prompt = ""
     full_prompt = ""
+    caption_detailed = ""
+    caption_long = ""
+    caption_short = ""
 
     if "json" in sample:
         json_data = sample["json"]
@@ -130,7 +133,7 @@ def transform_sample(sample):
                 np.random.shuffle(all_general)
                 # Keep fewer tags: random between 1 and len
                 if len(all_general) > 1:
-                    keep_count = np.random.randint(1, len(all_general) + 1)
+                    keep_count = np.random.randint(1, (len(all_general) // 2) + 1)
                     all_general = all_general[:keep_count]
 
                 parts.extend(all_general)
@@ -140,7 +143,9 @@ def transform_sample(sample):
                 rating = json_data.get("rating", [])
                 character_tags = json_data.get("character_tags", [])
                 general_tags = json_data.get("general_tags", [])
-
+                caption_detailed = str(json_data.get("caption_detailed", "")).strip()
+                caption_long = str(json_data.get("caption_long", "")).strip()
+                caption_short = str(json_data.get("caption_short", "")).strip()
                 # Helper to process tag lists
                 def process_tags(tags):
                     if isinstance(tags, list):
@@ -204,7 +209,10 @@ def transform_sample(sample):
         "image": image,
         "prompts": prompt,
         "full_prompts": full_prompt,
-        "key": sample.get("__key__", "unknown")
+        "caption_detailed": caption_detailed,
+        "caption_long": caption_long,
+        "caption_short": caption_short,
+        "key": sample.get("__key__", "unknown"),
     }
 
 
@@ -231,7 +239,10 @@ def bucket_batcher(data_stream, batch_size=1, bucket_sizes=None, bucket_ratios=N
             buckets[b_idx].append({
                 "pixels": image_tensor,
                 "prompts": sample["prompts"],
-                "full_prompts": sample["full_prompts"]
+                "full_prompts": sample["full_prompts"],
+                "caption_detailed": sample.get("caption_detailed", ""),
+                "caption_long": sample.get("caption_long", ""),
+                "caption_short": sample.get("caption_short", ""),
             })
 
             if len(buckets[b_idx]) >= batch_size:
@@ -239,13 +250,97 @@ def bucket_batcher(data_stream, batch_size=1, bucket_sizes=None, bucket_ratios=N
                 yield {
                     "pixels": torch.stack([x["pixels"] for x in batch]),
                     "prompts": [x["prompts"] for x in batch],
-                    "full_prompts": [x["full_prompts"] for x in batch]
+                    "full_prompts": [x["full_prompts"] for x in batch],
+                    "caption_detailed": [x["caption_detailed"] for x in batch],
+                    "caption_long": [x["caption_long"] for x in batch],
+                    "caption_short": [x["caption_short"] for x in batch],
                 }
                 buckets[b_idx] = []
 
-        except Exception as e:
+        except Exception:
             continue
 
+
+
+# --- 3. Fast Batcher (Random Resized Crop with Coords) ---
+def fast_batcher(data_stream, batch_size=1, resolution=256):
+    to_tensor = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize([0.5], [0.5])
+    ])
+    
+    batch = []
+    
+    for sample in data_stream:
+        try:
+            image = sample["image"]
+            orig_w, orig_h = image.size
+            
+            # Random Resized Crop Logic (custom implementation to get coords)
+            # We want a square crop of size 'resolution'
+            # But "Random Resized Crop" usually means: pick a random area of the image, 
+            # and resize that area to (resolution, resolution).
+            # The standard PyTorch RandomResizedCrop params are scale=(0.08, 1.0), ratio=(3./4., 4./3.)
+            # Here user said: "random resized crop so that it is still 1:1 ratio"
+            # This implies we crop a square region from the original image (at random scale and position)
+            # and resize it to resolution x resolution.
+            
+            scale = np.random.uniform(0.5, 1.0) # Conservative scale range, can be adjusted
+            # crop size based on scale relative to the smaller dimension to ensure it fits
+            min_dim = min(orig_w, orig_h)
+            crop_size = int(min_dim * scale)
+            
+            # Ensure crop_size is at least something reasonable
+            if crop_size < 16: crop_size = 16
+            
+            # Random position
+            if orig_w > crop_size:
+                left = np.random.randint(0, orig_w - crop_size + 1)
+            else:
+                left = 0
+                
+            if orig_h > crop_size:
+                top = np.random.randint(0, orig_h - crop_size + 1)
+            else:
+                top = 0
+                
+            # Perform Crop
+            # (left, upper, right, lower)
+            crop_box = (left, top, left + crop_size, top + crop_size)
+            image_cropped = image.crop(crop_box)
+            
+            # Resize to target resolution
+            image_resized = image_cropped.resize((resolution, resolution), Image.BICUBIC)
+            
+            image_tensor = to_tensor(image_resized)
+            
+            # Normalized Coordinates: x (left), y (top), w, h
+            # Relative to original image size
+            norm_left = left / orig_w
+            norm_top = top / orig_h
+            norm_w = crop_size / orig_w
+            norm_h = crop_size / orig_h
+            
+            coords = torch.tensor([norm_left, norm_top, norm_w, norm_h], dtype=torch.float32)
+            
+            batch.append({
+                "pixels": image_tensor,
+                "prompts": sample["prompts"],
+                "full_prompts": sample["full_prompts"],
+                "crop_coords": coords
+            })
+
+            if len(batch) >= batch_size:
+                yield {
+                    "pixels": torch.stack([x["pixels"] for x in batch]),
+                    "prompts": [x["prompts"] for x in batch],
+                    "full_prompts": [x["full_prompts"] for x in batch],
+                    "crop_coords": torch.stack([x["crop_coords"] for x in batch])
+                }
+                batch = []
+
+        except Exception as e:
+            continue
 
 
 # --- 4. The Pipeline Builder ---
@@ -288,3 +383,38 @@ def get_wds_loader(url_pattern, batch_size, num_workers=4, is_train=True, base_r
 
     return loader
 
+
+def get_fast_wds_loader(url_pattern, batch_size, num_workers=4, is_train=True, resolution=256):
+    dataset = wds.WebDataset(
+        url_pattern,
+        resampled=True,
+        handler=wds.warn_and_continue,
+        nodesplitter=wds.split_by_node,
+        shardshuffle=True
+    )
+
+    if is_train:
+        dataset = dataset.shuffle(1000)
+
+    dataset = dataset.compose(wds.split_by_worker)
+    dataset = dataset.decode("pil", handler=wds.warn_and_continue)
+    dataset = dataset.map(transform_sample, handler=wds.warn_and_continue)
+
+    # Use decodit_batcher which does random resized crop and returns coords
+    # Handle list resolution if passed
+    if isinstance(resolution, (list, tuple)):
+        resolution = resolution[0]
+        
+    dataset = dataset.compose(
+        partial(fast_batcher, batch_size=batch_size, resolution=resolution)
+    )
+
+    loader = wds.WebLoader(
+        dataset,
+        batch_size=None,
+        num_workers=num_workers,
+        pin_memory=True,
+        prefetch_factor=2
+    )
+
+    return loader

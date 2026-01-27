@@ -15,11 +15,10 @@ model:
   text_encoder_subfolder: "text_encoder"
   tokenizer_subfolder: "tokenizer"
 
-  vae_path: "REPA-E/e2e-flux-vae"
-  vae_subfolder: null
-  vae_path: "REPA-E/e2e-flux-vae"
+  vae_path: "Tongyi-MAI/Z-Image-Turbo"
+  vae_subfolder: "vae"
   transformer_class_path: "diffusers.ZImageTransformer2DModel"
-  model_type: "zimage" # Options: "zimage", "sana", "decodit"
+  model_type: "zimage" # Options: "zimage", "lumina2"
   mixed_precision: "bf16" # Options: "no", "fp16", "bf16"
   gradient_checkpointing: true
 
@@ -27,8 +26,8 @@ model:
 training:
   max_train_steps: 1000000
   train_batch_size: 64
-  learning_rate: 0.0002
-  lr_warmup_steps: 1000
+  learning_rate: 0.00001
+  lr_warmup_steps: 100
   lr_scheduler_type: "cosine" # Options: "linear", "cosine", "constant"
   gradient_accumulation_steps: 1
   max_grad_norm: 1.0
@@ -37,8 +36,8 @@ training:
   ema_update_after_step: 0
   
   # Loss components
-  afm_lambda: 0
-  consistency_lambda: 0
+  afm_lambda: 0.05
+  consistency_lambda: 0.1
   
   # Timestep Sampling
   timestep_sampling:
@@ -54,8 +53,8 @@ training:
 
   # Validation / Visualization
   validation_steps: 500
-  validation_num_inference_steps: 50
-  validation_guidance_scale: 1
+  validation_num_inference_steps: 30
+  validation_guidance_scale: 4
   validation_prompt:
     - "general, shana, 1girl >:) black_thighhighs bow closed_mouth grey_bow grey_sailor_collar grey_skirt hair_between_eyes holding holding_sword holding_weapon katana long_hair looking_at_viewer puffy_short_sleeves puffy_sleeves red_eyes red_hair sailor_collar school_uniform serafuku shirt short_sleeves skirt smile solo standing sword thighhighs v-shaped_eyebrows very_long_hair weapon white_background white_shirt"
     - "general, sakuraba_ema, 1girl belt beret black_background black_belt black_dress black_hat bug butterfly butterfly_on_hand cherry_blossoms cowboy_shot dress empty_eyes flower hair_flower hair_ornament hand_up hat long_sleeves looking_at_viewer multicolored_hair neck_ribbon o-ring o-ring_thigh_strap parted_lips pink_eyes pink_hair red_butterfly ribbon shirt short_hair shorts skeletal_wings solo standing thigh_strap white_flower white_hair white_ribbon white_shirt white_shorts wings witch_(manosaba) x_hair_ornament"
@@ -74,7 +73,7 @@ training:
 # Data Configuration
 data:
   #data_url: "pipe:curl -s -L https://huggingface.co/datasets/DSULT-Alya/Renai-Circulation-bucketized-crossing-field/resolve/main/0000/bucket_00{{00..99}}_000000.tar -H 'Authorization:Bearer '"
-  data_url: "/workspace/shinon/anime/train/000{01..37}.tar"
+  data_url: "/workspace/shinon/t2i/anime/train/00{001..213}.tar"
   resolution: 256
   fast_mode: false # Set to true for SR-DiT fast loading
   bucket_step_size: 32

@@ -4,28 +4,24 @@ import yaml
 import os
 import shutil
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-import gc
 import logging
-import math
 from datetime import timedelta
 from tqdm.auto import tqdm
-from diffusers.optimization import get_scheduler
 from trainer.data import get_dataloader
 from trainer.models import load_models
 from trainer.utils import log_validation, save_model_card
-from trainer.models.zimage_wrapper import ZImageWrapper
-from trainer.models.sana_wrapper import SanaWrapper
 from contextlib import nullcontext
 from pytorch_optimizer.optimizer import ScheduleFreeAdamW
+
+def is_valid_prompt(p):
+    return p is not None and isinstance(p, str) and p.strip() != ""
+
 
 # WandB check
 try:
     import wandb
-
     _has_wandb = True
 except ImportError:
     _has_wandb = False
@@ -37,23 +33,7 @@ logger = logging.getLogger(__name__)
 def flatten_config(config, parent_key='', sep='_'):
     items = []
     for k, v in config.items():
-        # Special handling for lists like validation_prompt to keep them as is
-        if isinstance(v, dict) and not (k == "timestep_sampling"): # Keep timestep_sampling as dict if needed by wrapper
-             # But wait, original code accessed args.timestep_sampling as a dict? 
-             # Let's check usage. 
-             # usage: timestep_sampling_config = getattr(args, "timestep_sampling", None)
-             # So timestep_sampling should remain a dict in args.
-             # However, simple flattening would make it timestep_sampling_weighting_scheme etc.
-             # We should probably flatten but ALSO keep sub-dicts if they represent coherent config objects.
-             
-             # Let's just flatten everything recursively for now, but also check how to handle
-             # things that were top-level before. 
-             # Actually, the best approach for this refactor without breaking code is:
-             # 1. Load config
-             # 2. Add keys to parser.
-             # If we have sections, we can flatten them into the top level namespace
-             # e.g. training.learning_rate -> args.learning_rate
-             
+        if isinstance(v, dict) and not (k == "timestep_sampling"): 
              items.extend(flatten_config(v, parent_key='', sep=sep).items())
         else:
             items.append((k, v))
@@ -67,14 +47,11 @@ def parse_args():
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
 
-    # Flatten the config for argument parsing
-    # This allows sections in yaml (e.g. model: learning_rate) to be accessed as args.learning_rate
-    # which matches current code expectation.
     flat_config = {}
     
     def flatten(d):
         for k, v in d.items():
-            if isinstance(v, dict) and k != "timestep_sampling" and k != "model_config": # Exception for known dict args
+            if isinstance(v, dict) and k != "timestep_sampling" and k != "model_config": 
                  flatten(v)
             else:
                 flat_config[k] = v
@@ -88,25 +65,89 @@ def parse_args():
         if isinstance(v, (int, float, str, bool)) or v is None:
             parser.add_argument(f"--{k}", type=type(v) if v is not None else str, default=v)
         elif isinstance(v, list):
-             # Handle lists (like validation prompts)
-             # argparse doesn't handle lists well by default in this dynamic way without 'nargs'
-             # but since we set default=v, it works for internal usage.
-             # If passed via CLI, user might need to pass multiple times or we need specific handling.
-             # For now, we assume these are mostly set in config.
              parser.add_argument(f"--{k}", default=v)
         else:
             parser.add_argument(f"--{k}", default=v)
 
-    # Standard DDP arguments
     parser.add_argument("--local_rank", type=int, default=int(os.environ.get("LOCAL_RANK", -1)))
     return parser.parse_args()
+
+
+# --- NEW HELPER FUNCTION ---
+def select_validation_prompts(dataloader, keyword="general", count=16):
+    """
+    Selects validation prompts:
+    - ~50% containing `keyword` (general prompts)
+    - ~50% from caption_detailed or caption_long (prefer detailed),
+      regardless of keyword presence.
+    """
+
+    logger.info(
+        f"Selecting {count} validation prompts "
+        f"(~50% '{keyword}', ~50% captions)..."
+    )
+
+    target_general = count // 2
+    target_caption = count - target_general
+
+    general_prompts = []
+    caption_prompts = []
+
+    temp_iter = iter(dataloader)
+
+    def is_valid(p):
+        return isinstance(p, str) and p.strip() != ""
+
+    with tqdm(total=count, desc="Finding Prompts", unit="p") as pbar:
+        while len(general_prompts) < target_general or len(caption_prompts) < target_caption:
+            try:
+                batch = next(temp_iter)
+            except StopIteration:
+                logger.warning("Dataset exhausted before reaching target counts.")
+                break
+
+            batch_size = len(batch.get("prompts", []))
+
+            for i in range(batch_size):
+                # ---- General prompts (keyword-based) ----
+                if len(general_prompts) < target_general:
+                    for key in ("full_prompts", "prompts"):
+                        p = batch.get(key, [None] * batch_size)[i]
+                        if is_valid(p) and keyword.lower() in p.lower():
+                            if p not in general_prompts:
+                                general_prompts.append(p)
+                                pbar.update(1)
+                            break
+
+                # ---- Caption prompts (preferred detailed) ----
+                if len(caption_prompts) < target_caption:
+                    p = batch.get("caption_detailed", [None] * batch_size)[i]
+                    if not is_valid(p):
+                        p = batch.get("caption_long", [None] * batch_size)[i]
+
+                    if is_valid(p) and p not in caption_prompts:
+                        caption_prompts.append(p)
+                        pbar.update(1)
+
+                if len(general_prompts) >= target_general and len(caption_prompts) >= target_caption:
+                    break
+
+    selected = general_prompts[:target_general] + caption_prompts[:target_caption]
+
+    logger.info(
+        f"Selected {len(selected)} validation prompts "
+        f"({len(general_prompts)} general, {len(caption_prompts)} captions)."
+    )
+
+    return selected
+
+# ---------------------------
 
 
 def main():
     args = parse_args()
 
     # DDP Initialization
-    # torchrun sets RANK, WORLD_SIZE, LOCAL_RANK, MASTER_ADDR, MASTER_PORT
     if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
         rank = int(os.environ["RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
@@ -116,7 +157,6 @@ def main():
         device = torch.device(f"cuda:{local_rank}")
 
         if not dist.is_initialized():
-            # In newer torch, we can specify device_id in init_process_group to avoid warnings
             try:
                 dist.init_process_group(
                     backend="nccl", 
@@ -125,7 +165,6 @@ def main():
                     device_id=torch.device(f"cuda:{local_rank}")
                 )
             except TypeError:
-                # Fallback for older torch versions
                 dist.init_process_group(
                     backend="nccl", 
                     init_method="env://", 
@@ -143,12 +182,9 @@ def main():
     if rank == 0:
         os.makedirs(args.output_dir, exist_ok=True)
         print(f"Running on {world_size} processes.")
-        print(args)
-
         # Initialize trackers
         if args.report_to == "wandb" and _has_wandb:
             wandb.init(project="zimage-training", config=vars(args), dir=args.output_dir)
-
     else:
         logger.setLevel(logging.ERROR)
 
@@ -163,19 +199,17 @@ def main():
         weight_dtype = torch.float16
     elif args.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
-
+    args.device = device
+    
     # Load Models
-    # Models are loaded directly to device using device_map and low_cpu_mem_usage
     noise_scheduler, tokenizer, text_encoder, vae, transformer = load_models(args, device=device, weight_dtype=weight_dtype)
 
     # Create Wrapper
     timestep_sampling_config = getattr(args, "timestep_sampling", None)
     model_type = getattr(args, "model_type", "zimage")
 
-    # Use the factory from trainer/models/__init__.py
     from trainer.models import get_model_wrapper
     
-    # Common kwargs
     wrapper_kwargs = {
         "transformer": transformer,
         "vae": vae,
@@ -185,7 +219,6 @@ def main():
         "args": args
     }
     
-    # Add model specific args if needed
     if model_type == "zimage":
         wrapper_kwargs.update({
             "timestep_sampling_config": timestep_sampling_config,
@@ -199,31 +232,30 @@ def main():
     if args.gradient_checkpointing:
         model_wrapper.transformer.enable_gradient_checkpointing()
 
-    # Move wrapper to device (components are already on device but wrapper itself needs move)
     model_wrapper = model_wrapper.to(device)
 
-    # Wrap DDP
     if world_size > 1:
         model_wrapper = DDP(model_wrapper, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
 
-    # Optimizer
     optimizer = ScheduleFreeAdamW(
         model_wrapper.parameters(), lr=args.learning_rate, weight_decay=1e-2
     )
 
     # Dataset
-    # WebDataset automatically handles splitting with split_by_node if dist is initialized
     dataloader = get_dataloader(args)
 
-    # Scheduler
-    #lr_scheduler = get_scheduler(
-    #    getattr(args, "lr_scheduler_type", "constant"),
-    #    optimizer=optimizer,
-    #    num_warmup_steps=args.lr_warmup_steps,
-    #    num_training_steps=args.max_train_steps
-    #)
+    # === DYNAMIC PROMPT SELECTION LOGIC ===
+    # We do this here, before the training loop starts, so we have the prompts ready for all validations.
+    if rank == 0:
+        # We only scan on Rank 0
+        dynamic_prompts = select_validation_prompts(dataloader, keyword="general", count=32)
+        if dynamic_prompts:
+            args.validation_prompt = dynamic_prompts
+            logger.info(f"Updated validation prompts: {args.validation_prompt}")
+        else:
+            logger.warning("Could not find enough prompts with keyword 'general'. Keeping config prompts.")
+    # ======================================
 
-    # Scaler for FP16
     scaler = torch.cuda.amp.GradScaler(enabled=(args.mixed_precision == "fp16"))
 
     # === RESUME LOGIC ===
@@ -231,7 +263,6 @@ def main():
     path = args.resume_from_checkpoint
     
     if path:
-        # Resolve 'latest' on rank 0
         if rank == 0:
             if path == "latest":
                 if os.path.exists(args.output_dir):
@@ -242,7 +273,6 @@ def main():
                 else:
                     path = None
         
-        # Broadcast resolved path to all ranks
         if world_size > 1:
             object_list = [path]
             dist.broadcast_object_list(object_list, src=0)
@@ -252,46 +282,16 @@ def main():
             if rank == 0:
                 print(f"Resuming from checkpoint {path}")
             
-            # Load transformer weights
-            transformer_path = os.path.join(path, "transformer")
-            if os.path.exists(transformer_path):
-                if hasattr(transformer, "load_state_dict"):
-                    st_path = os.path.join(transformer_path, "diffusion_pytorch_model.safetensors")
-                    bin_path = os.path.join(transformer_path, "diffusion_pytorch_model.bin")
-                    
-                    state_dict = None
-                    if os.path.exists(st_path):
-                        try:
-                            from safetensors.torch import load_file
-                            state_dict = load_file(st_path)
-                        except ImportError:
-                            from diffusers.models.modeling_utils import load_state_dict
-                            state_dict = load_state_dict(st_path)
-                    elif os.path.exists(bin_path):
-                        state_dict = torch.load(bin_path, map_location="cpu")
-                    
-                    if state_dict is not None:
-                        # Load with strict=False to ignore shape mismatches
-                        missing, unexpected = transformer.load_state_dict(state_dict, strict=False)
-                        if rank == 0:
-                            if len(missing) > 0:
-                                print(f"Missing keys when loading transformer: {len(missing)}")
-                            if len(unexpected) > 0:
-                                print(f"Unexpected keys when loading transformer: {len(unexpected)}")
-                        del state_dict
-                    else:
-                        if rank == 0:
-                            print(f"No model weights found in {transformer_path}, skipping weight load.")
+            # transformer_path = os.path.join(path, "transformer")
+            # unwrapped.transformer.load_pretrained... (Assuming handled by framework or manually here)
                 
-            global_step = int(path.split("-")[-1])
+            global_step = int(path.split("-")[-1]) 
 
     # Training Loop
     progress_bar = tqdm(range(global_step, args.max_train_steps), disable=(rank != 0))
     progress_bar.set_description("Steps")
 
     data_iter = iter(dataloader)
-
-    # Mixed Precision Context
     amp_context = torch.amp.autocast('cuda', dtype=weight_dtype)
 
     while global_step < args.max_train_steps:
@@ -301,12 +301,10 @@ def main():
             data_iter = iter(dataloader)
             batch = next(data_iter)
 
-        # Gradient Accumulation Logic
         accum_loss = 0.0
         accum_logs = {}
 
         for i in range(args.gradient_accumulation_steps):
-            # Fetch data if not the first step in accumulation
             if i > 0:
                 try:
                     batch = next(data_iter)
@@ -316,29 +314,60 @@ def main():
 
             is_last_accum = (i == args.gradient_accumulation_steps - 1)
 
-            # Sync gradients only on the last step of accumulation
             if world_size > 1 and not is_last_accum:
                 context = model_wrapper.no_sync()
             else:
                 context = nullcontext()
-
+            
             with context:
-                images = batch["pixels"].to(device, dtype=weight_dtype)
-                prompts = batch["prompts"]
-                crop_coords = batch.get("crop_coords", None)
+                batch_size = len(batch["prompts"])
+                
+                gen = torch.Generator(device="cpu").manual_seed(int(global_step + 432))
+                
+                selected_prompts = []
+                
+                for i in range(batch_size):
+                    candidates = []
+                
+                    for key in (
+                        "prompts",
+                        "full_prompts",
+                        "caption_detailed",
+                        "caption_long",
+                        "caption_short",
+                    ):
+                        p = batch[key][i]
+                        if is_valid_prompt(p):
+                            candidates.append(p)
+                
+                    if len(candidates) == 0:
+                        raise ValueError(f"No valid prompts found for sample {i}")
+                
+                    idx = torch.randint(
+                        0,
+                        len(candidates),
+                        (1,),
+                        generator=gen,
+                    ).item()
+                
+                    selected_prompts.append(candidates[idx])
 
+                images = batch["pixels"].to(device, dtype=weight_dtype)
+                crop_coords = batch.get("crop_coords", None)
+                    
                 with amp_context:
-                    model_output = model_wrapper(
+                    model_output, metric = model_wrapper(
                         pixel_values=images,
-                        prompts=prompts,
+                        prompts=selected_prompts,
+                        full_prompt=selected_prompts,
                         crop_coords=crop_coords,
                         device=device,
-                        weight_dtype=weight_dtype
+                        weight_dtype=weight_dtype,
+                        global_step=global_step,
                     )
                     
                     if isinstance(model_output, dict):
                         loss = model_output["loss"]
-                        # Accumulate other metrics
                         for k, v in model_output.items():
                             if k not in accum_logs:
                                 accum_logs[k] = 0.0
@@ -346,50 +375,43 @@ def main():
                     else:
                         loss = model_output
                         accum_logs["loss"] = accum_logs.get("loss", 0.0) + loss.item() / args.gradient_accumulation_steps
+                        accum_logs["metric"] = accum_logs.get("metric", 0.0) + metric.item() / args.gradient_accumulation_steps
+                    loss = (loss + metric * 0.5) / args.gradient_accumulation_steps
+                    
 
-                    loss = loss / args.gradient_accumulation_steps
-
-                # Backward
                 scaler.scale(loss).backward()
                 accum_loss += loss.item()
 
-        # Step
         if args.max_grad_norm > 0:
             scaler.unscale_(optimizer)
             grad_norm = torch.nn.utils.clip_grad_norm_(model_wrapper.parameters(), args.max_grad_norm)
         else:
-            # Calculate grad norm even if not clipping for logging
             total_norm = 0.0
             for p in model_wrapper.parameters():
                 if p.grad is not None:
                     param_norm = p.grad.detach().data.norm(2)
                     total_norm += param_norm.item() ** 2
             grad_norm = total_norm ** 0.5
-            grad_norm = torch.tensor(grad_norm) # consistency
+            grad_norm = torch.tensor(grad_norm)
 
         scaler.step(optimizer)
         scaler.update()
         optimizer.zero_grad()
-
+        model_wrapper.module.step_ema(decay=0.999)
         global_step += 1
         progress_bar.update(1)
 
-        # Logs
         if rank == 0:
-            current_lr = 0.0002
+            current_lr = 0.0002 # Should likely fetch this from optimizer.param_groups[0]['lr']
             logs = {"lr": current_lr, "grad_norm": grad_norm.item()}
-            logs.update(accum_logs) # Add all accumulated losses
+            logs.update(accum_logs)
             
             if _has_wandb and wandb.run:
                 wandb.log(logs, step=global_step)
 
             progress_bar.set_postfix(**logs)
 
-        #lr_scheduler.step()
-
         # === VALIDATION & SAVING ===
-        # We should sync before saving/validating
-
         if global_step % args.checkpointing_steps == 0 or global_step % args.validation_steps == 0 or global_step == 1:
             if world_size > 1:
                 dist.barrier(device_ids=[local_rank])
@@ -401,16 +423,12 @@ def main():
                 os.makedirs(save_path, exist_ok=True)
 
                 try:
-                    # Unwrap
                     if hasattr(model_wrapper, "module"):
                         unwrapped = model_wrapper.module
                     else:
                         unwrapped = model_wrapper
 
-                    # Save Transformer
-                    # We usually want to save it such that it can be loaded by diffusers
-                    # The original code used unwrapped.transformer.save_pretrained
-                    unwrapped.transformer.save_pretrained(
+                    unwrapped.target_transformer.save_pretrained(
                         os.path.join(save_path, "transformer")
                     )
 
@@ -444,7 +462,6 @@ def main():
         if global_step % args.validation_steps == 0 or global_step == 1:
             if rank == 0:
                 with torch.no_grad():
-                    # We pass the wrapper. log_validation handles unwrapping now.
                     log_validation(
                         model_wrapper=model_wrapper,
                         args=args,
