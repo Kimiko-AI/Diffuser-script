@@ -4,16 +4,23 @@ import yaml
 import os
 import shutil
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+import gc
 import logging
+import math
 from datetime import timedelta
 from tqdm.auto import tqdm
+from diffusers.optimization import get_scheduler
 from trainer.data import get_dataloader
 from trainer.models import load_models
 from trainer.utils import log_validation, save_model_card
+from trainer.models.zimage_wrapper import ZImageWrapper
 from contextlib import nullcontext
 from pytorch_optimizer.optimizer import ScheduleFreeAdamW
+
 
 def is_valid_prompt(p):
     return p is not None and isinstance(p, str) and p.strip() != ""
@@ -22,6 +29,7 @@ def is_valid_prompt(p):
 # WandB check
 try:
     import wandb
+
     _has_wandb = True
 except ImportError:
     _has_wandb = False
@@ -33,11 +41,12 @@ logger = logging.getLogger(__name__)
 def flatten_config(config, parent_key='', sep='_'):
     items = []
     for k, v in config.items():
-        if isinstance(v, dict) and not (k == "timestep_sampling"): 
-             items.extend(flatten_config(v, parent_key='', sep=sep).items())
+        if isinstance(v, dict) and not (k == "timestep_sampling"):
+            items.extend(flatten_config(v, parent_key='', sep=sep).items())
         else:
             items.append((k, v))
     return dict(items)
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -48,24 +57,24 @@ def parse_args():
         config = yaml.safe_load(f)
 
     flat_config = {}
-    
+
     def flatten(d):
         for k, v in d.items():
-            if isinstance(v, dict) and k != "timestep_sampling" and k != "model_config": 
-                 flatten(v)
+            if isinstance(v, dict) and k != "timestep_sampling" and k != "model_config":
+                flatten(v)
             else:
                 flat_config[k] = v
-    
+
     flatten(config)
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default=args.config)
-    
+
     for k, v in flat_config.items():
         if isinstance(v, (int, float, str, bool)) or v is None:
             parser.add_argument(f"--{k}", type=type(v) if v is not None else str, default=v)
         elif isinstance(v, list):
-             parser.add_argument(f"--{k}", default=v)
+            parser.add_argument(f"--{k}", default=v)
         else:
             parser.add_argument(f"--{k}", default=v)
 
@@ -91,7 +100,6 @@ def select_validation_prompts(dataloader, keyword="general", count=16):
     target_caption = count - target_general
 
     general_prompts = []
-    caption_prompts = []
 
     temp_iter = iter(dataloader)
 
@@ -99,7 +107,7 @@ def select_validation_prompts(dataloader, keyword="general", count=16):
         return isinstance(p, str) and p.strip() != ""
 
     with tqdm(total=count, desc="Finding Prompts", unit="p") as pbar:
-        while len(general_prompts) < target_general or len(caption_prompts) < target_caption:
+        while len(general_prompts) < target_general:
             try:
                 batch = next(temp_iter)
             except StopIteration:
@@ -125,21 +133,16 @@ def select_validation_prompts(dataloader, keyword="general", count=16):
                     if not is_valid(p):
                         p = batch.get("caption_long", [None] * batch_size)[i]
 
-                    if is_valid(p) and p not in caption_prompts:
-                        caption_prompts.append(p)
-                        pbar.update(1)
 
-                if len(general_prompts) >= target_general and len(caption_prompts) >= target_caption:
-                    break
-
-    selected = general_prompts[:target_general] + caption_prompts[:target_caption]
+    selected = general_prompts[:target_general]
 
     logger.info(
         f"Selected {len(selected)} validation prompts "
-        f"({len(general_prompts)} general, {len(caption_prompts)} captions)."
+        f"({len(general_prompts)} general"
     )
 
     return selected
+
 
 # ---------------------------
 
@@ -152,22 +155,22 @@ def main():
         rank = int(os.environ["RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
         local_rank = int(os.environ["LOCAL_RANK"])
-        
+
         torch.cuda.set_device(local_rank)
         device = torch.device(f"cuda:{local_rank}")
 
         if not dist.is_initialized():
             try:
                 dist.init_process_group(
-                    backend="nccl", 
-                    init_method="env://", 
+                    backend="nccl",
+                    init_method="env://",
                     timeout=timedelta(hours=2),
                     device_id=torch.device(f"cuda:{local_rank}")
                 )
             except TypeError:
                 dist.init_process_group(
-                    backend="nccl", 
-                    init_method="env://", 
+                    backend="nccl",
+                    init_method="env://",
                     timeout=timedelta(hours=2)
                 )
     else:
@@ -200,16 +203,17 @@ def main():
     elif args.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
     args.device = device
-    
+
     # Load Models
-    noise_scheduler, tokenizer, text_encoder, vae, transformer = load_models(args, device=device, weight_dtype=weight_dtype)
+    noise_scheduler, tokenizer, text_encoder, vae, transformer = load_models(args, device=device,
+                                                                             weight_dtype=weight_dtype)
 
     # Create Wrapper
     timestep_sampling_config = getattr(args, "timestep_sampling", None)
     model_type = getattr(args, "model_type", "zimage")
 
     from trainer.models import get_model_wrapper
-    
+
     wrapper_kwargs = {
         "transformer": transformer,
         "vae": vae,
@@ -218,7 +222,7 @@ def main():
         "noise_scheduler": noise_scheduler,
         "args": args
     }
-    
+
     if model_type == "zimage":
         wrapper_kwargs.update({
             "timestep_sampling_config": timestep_sampling_config,
@@ -226,7 +230,7 @@ def main():
             "afm_lambda": getattr(args, "afm_lambda", 0.0),
             "consistency_lambda": getattr(args, "consistency_lambda", 1.0)
         })
-    
+
     model_wrapper = get_model_wrapper(model_type, **wrapper_kwargs)
 
     if args.gradient_checkpointing:
@@ -235,7 +239,8 @@ def main():
     model_wrapper = model_wrapper.to(device)
 
     if world_size > 1:
-        model_wrapper = DDP(model_wrapper, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
+        model_wrapper = DDP(model_wrapper, device_ids=[local_rank], output_device=local_rank,
+                            find_unused_parameters=True)
 
     optimizer = ScheduleFreeAdamW(
         model_wrapper.parameters(), lr=args.learning_rate, weight_decay=1e-2
@@ -261,7 +266,7 @@ def main():
     # === RESUME LOGIC ===
     global_step = 0
     path = args.resume_from_checkpoint
-    
+
     if path:
         if rank == 0:
             if path == "latest":
@@ -272,7 +277,7 @@ def main():
                     path = os.path.join(args.output_dir, dirs[-1]) if len(dirs) > 0 else None
                 else:
                     path = None
-        
+
         if world_size > 1:
             object_list = [path]
             dist.broadcast_object_list(object_list, src=0)
@@ -281,13 +286,13 @@ def main():
         if path and os.path.exists(path):
             if rank == 0:
                 print(f"Resuming from checkpoint {path}")
-            
+
             # transformer_path = os.path.join(path, "transformer")
             # unwrapped.transformer.load_pretrained... (Assuming handled by framework or manually here)
-                
-            global_step = int(path.split("-")[-1]) 
 
-    # Training Loop
+            global_step = int(path.split("-")[-1])
+
+            # Training Loop
     progress_bar = tqdm(range(global_step, args.max_train_steps), disable=(rank != 0))
     progress_bar.set_description("Steps")
 
@@ -318,43 +323,50 @@ def main():
                 context = model_wrapper.no_sync()
             else:
                 context = nullcontext()
-            
+
             with context:
                 batch_size = len(batch["prompts"])
-                
+
                 gen = torch.Generator(device="cpu").manual_seed(int(global_step + 432))
-                
+
                 selected_prompts = []
-                
+
                 for i in range(batch_size):
                     candidates = []
-                
+
                     for key in (
-                        "prompts",
-                        "full_prompts",
-                        "caption_detailed",
-                        "caption_long",
-                        "caption_short",
+                            "prompts",
+                            "full_prompts",
+                            "caption_detailed",
+                            "caption_long",
+                            "caption_short",
                     ):
                         p = batch[key][i]
                         if is_valid_prompt(p):
                             candidates.append(p)
-                
+
                     if len(candidates) == 0:
                         raise ValueError(f"No valid prompts found for sample {i}")
-                
+
                     idx = torch.randint(
                         0,
                         len(candidates),
                         (1,),
                         generator=gen,
                     ).item()
-                
+
                     selected_prompts.append(candidates[idx])
 
                 images = batch["pixels"].to(device, dtype=weight_dtype)
+                # prompts = batch["prompts"]
+                # full_prompt = batch["full_prompts"]
                 crop_coords = batch.get("crop_coords", None)
-                    
+                # gen = torch.Generator().manual_seed(int(global_step + 432))
+                # if torch.rand(1, generator=gen).item() < 0.5:
+                #    selected_prompts = full_prompt
+                # else:
+                #    selected_prompts = prompts
+
                 with amp_context:
                     model_output, metric = model_wrapper(
                         pixel_values=images,
@@ -365,7 +377,7 @@ def main():
                         weight_dtype=weight_dtype,
                         global_step=global_step,
                     )
-                    
+
                     if isinstance(model_output, dict):
                         loss = model_output["loss"]
                         for k, v in model_output.items():
@@ -374,10 +386,11 @@ def main():
                             accum_logs[k] += v.item() / args.gradient_accumulation_steps
                     else:
                         loss = model_output
-                        accum_logs["loss"] = accum_logs.get("loss", 0.0) + loss.item() / args.gradient_accumulation_steps
-                        accum_logs["metric"] = accum_logs.get("metric", 0.0) + metric.item() / args.gradient_accumulation_steps
+                        accum_logs["loss"] = accum_logs.get("loss",
+                                                            0.0) + loss.item() / args.gradient_accumulation_steps
+                        accum_logs["metric"] = accum_logs.get("metric",
+                                                              0.0) + metric.item() / args.gradient_accumulation_steps
                     loss = (loss + metric * 0.5) / args.gradient_accumulation_steps
-                    
 
                 scaler.scale(loss).backward()
                 accum_loss += loss.item()
@@ -402,10 +415,10 @@ def main():
         progress_bar.update(1)
 
         if rank == 0:
-            current_lr = 0.0002 # Should likely fetch this from optimizer.param_groups[0]['lr']
+            current_lr = 0.0002  # Should likely fetch this from optimizer.param_groups[0]['lr']
             logs = {"lr": current_lr, "grad_norm": grad_norm.item()}
             logs.update(accum_logs)
-            
+
             if _has_wandb and wandb.run:
                 wandb.log(logs, step=global_step)
 

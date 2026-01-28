@@ -6,6 +6,7 @@ import numpy as np
 from functools import partial
 import json
 
+
 def generate_buckets(base_width, base_height, step_size=32):
     # Generate bucket sizes based on the formula (BASE_WIDTH - STEP_SIZE * n, BASE_HEIGHT + STEP_SIZE * n)
     # where n ranges from -4 to 4 (inclusive).
@@ -37,6 +38,7 @@ def resize_to_bucket(image, bucket_idx, bucket_sizes):
     target_w, target_h = bucket_sizes[bucket_idx]
     return image.resize((target_w, target_h), Image.BICUBIC)
 
+
 # --- 1. Preprocessing Function ---
 def transform_sample(sample):
     # Adapting to common WDS formats (jpg/png/webp)
@@ -65,18 +67,18 @@ def transform_sample(sample):
         if isinstance(json_data, dict):
             parts = []
             full_parts = []
-            
+
             # --- Pixiv Extraction ---
             pixiv_tags_str = ""
             pixiv_title_str = ""
-            
+
             if "pixiv" in json_data:
                 p_data = json_data["pixiv"]
-                
+
                 # Extract Title
                 if "work" in p_data and "titl" in p_data["work"]:
                     pixiv_title_str = str(p_data["work"]["titl"])
-                    
+
                 # Extract Tags (Eng > Romaji > Orig)
                 if "tags" in p_data and "tags" in p_data["tags"]:
                     p_tags_list = p_data["tags"]["tags"]
@@ -88,7 +90,7 @@ def transform_sample(sample):
                                 t_val = t_obj.get("romaji")
                             if not t_val:
                                 t_val = t_obj.get("orig")
-                            
+
                             if t_val:
                                 extracted_p_tags.append(str(t_val))
                     pixiv_tags_str = " ".join(extracted_p_tags)
@@ -146,6 +148,7 @@ def transform_sample(sample):
                 caption_detailed = str(json_data.get("caption_detailed", "")).strip()
                 caption_long = str(json_data.get("caption_long", "")).strip()
                 caption_short = str(json_data.get("caption_short", "")).strip()
+
                 # Helper to process tag lists
                 def process_tags(tags):
                     if isinstance(tags, list):
@@ -180,22 +183,22 @@ def transform_sample(sample):
                 parts.extend(gen_parts)
 
             prompt = " ".join(parts)[:512]
-            
+
             # --- Replacement Logic ---
             # 20% chance to replace with Title
             # 20% chance to replace with Pixiv Tags
             # Independent events. If both occur, we combine them.
-            
+
             replace_with_title = (pixiv_title_str != "") and (np.random.random() < 0.2)
             replace_with_ptags = (pixiv_tags_str != "") and (np.random.random() < 0.2)
-            
+
             if replace_with_title and replace_with_ptags:
                 prompt = f"{pixiv_title_str} {pixiv_tags_str}"[:512]
             elif replace_with_title:
                 prompt = pixiv_title_str[:512]
             elif replace_with_ptags:
                 prompt = pixiv_tags_str[:512]
-            
+
         else:
             prompt = str(json_data)
             full_prompt = prompt
@@ -261,68 +264,67 @@ def bucket_batcher(data_stream, batch_size=1, bucket_sizes=None, bucket_ratios=N
             continue
 
 
-
-# --- 3. Fast Batcher (Random Resized Crop with Coords) ---
-def fast_batcher(data_stream, batch_size=1, resolution=256):
+# --- 3. DecoDiT Batcher (Random Resized Crop with Coords) ---
+def decodit_batcher(data_stream, batch_size=1, resolution=256):
     to_tensor = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize([0.5], [0.5])
     ])
-    
+
     batch = []
-    
+
     for sample in data_stream:
         try:
             image = sample["image"]
             orig_w, orig_h = image.size
-            
+
             # Random Resized Crop Logic (custom implementation to get coords)
             # We want a square crop of size 'resolution'
-            # But "Random Resized Crop" usually means: pick a random area of the image, 
+            # But "Random Resized Crop" usually means: pick a random area of the image,
             # and resize that area to (resolution, resolution).
             # The standard PyTorch RandomResizedCrop params are scale=(0.08, 1.0), ratio=(3./4., 4./3.)
             # Here user said: "random resized crop so that it is still 1:1 ratio"
             # This implies we crop a square region from the original image (at random scale and position)
             # and resize it to resolution x resolution.
-            
-            scale = np.random.uniform(0.5, 1.0) # Conservative scale range, can be adjusted
+
+            scale = np.random.uniform(0.5, 1.0)  # Conservative scale range, can be adjusted
             # crop size based on scale relative to the smaller dimension to ensure it fits
             min_dim = min(orig_w, orig_h)
             crop_size = int(min_dim * scale)
-            
+
             # Ensure crop_size is at least something reasonable
             if crop_size < 16: crop_size = 16
-            
+
             # Random position
             if orig_w > crop_size:
                 left = np.random.randint(0, orig_w - crop_size + 1)
             else:
                 left = 0
-                
+
             if orig_h > crop_size:
                 top = np.random.randint(0, orig_h - crop_size + 1)
             else:
                 top = 0
-                
+
             # Perform Crop
             # (left, upper, right, lower)
             crop_box = (left, top, left + crop_size, top + crop_size)
             image_cropped = image.crop(crop_box)
-            
+
             # Resize to target resolution
             image_resized = image_cropped.resize((resolution, resolution), Image.BICUBIC)
-            
+
             image_tensor = to_tensor(image_resized)
-            
+
             # Normalized Coordinates: x (left), y (top), w, h
             # Relative to original image size
             norm_left = left / orig_w
             norm_top = top / orig_h
             norm_w = crop_size / orig_w
             norm_h = crop_size / orig_h
-            
+
             coords = torch.tensor([norm_left, norm_top, norm_w, norm_h], dtype=torch.float32)
-            
+
             batch.append({
                 "pixels": image_tensor,
                 "prompts": sample["prompts"],
@@ -404,9 +406,9 @@ def get_fast_wds_loader(url_pattern, batch_size, num_workers=4, is_train=True, r
     # Handle list resolution if passed
     if isinstance(resolution, (list, tuple)):
         resolution = resolution[0]
-        
+
     dataset = dataset.compose(
-        partial(fast_batcher, batch_size=batch_size, resolution=resolution)
+        partial(decodit_batcher, batch_size=batch_size, resolution=resolution)
     )
 
     loader = wds.WebLoader(
